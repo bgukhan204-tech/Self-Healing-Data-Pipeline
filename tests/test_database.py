@@ -324,3 +324,32 @@ def test_pipeline_run_query_bounds_limit_and_returns_run_details(temp_db):
 
     bounded_runs = get_pipeline_runs(limit=0, db_path=temp_db)
     assert len(bounded_runs) == 1
+
+
+def test_pipeline_run_query_filters_by_status(temp_db):
+    """Run history status filter should return only matching runs."""
+    for run_id, status in [
+        ("run_filter_healthy", "Healthy"),
+        ("run_filter_warning", "Warning"),
+        ("run_filter_error", "Error"),
+    ]:
+        log_pipeline_run(
+            run_id=run_id,
+            dataset_name=f"{run_id}.csv",
+            records_total=5,
+            records_valid=5,
+            records_quarantined=0,
+            records_anomalous=0,
+            quality_score=100.0,
+            status=status,
+            execution_time_ms=25.0,
+            db_path=temp_db,
+        )
+
+    warnings = get_pipeline_runs(limit=20, db_path=temp_db, status="Warning")
+    assert len(warnings) == 1
+    assert warnings[0]["run_id"] == "run_filter_warning"
+    assert warnings[0]["status"] == "Warning"
+
+    all_runs = get_pipeline_runs(limit=20, db_path=temp_db, status="ALL")
+    assert len(all_runs) == 3
