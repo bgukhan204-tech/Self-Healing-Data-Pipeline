@@ -486,6 +486,7 @@ def get_recent_anomaly_events(
     db_path: Optional[Path] = None,
     run_id: Optional[str] = None,
     search: Optional[str] = None,
+    min_score: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     """Retrieve recent anomaly detections, optionally filtered for investigation.
 
@@ -508,6 +509,9 @@ def get_recent_anomaly_events(
             "OR top_contributing_feature LIKE ?)"
         )
         params.extend([pattern, pattern, pattern])
+    if min_score is not None:
+        conditions.append("anomaly_score >= ?")
+        params.append(float(min_score))
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
     query += " ORDER BY datetime(created_at) DESC, id DESC LIMIT ?"
