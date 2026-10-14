@@ -104,13 +104,17 @@ with col3:
 with col4:
     active_ver = active_model["model_version"] if active_model else "None"
     active_f1 = f"{active_model['f1_score']:.3f}" if active_model and active_model.get("f1_score") else "N/A"
-    rec_rate = summary_stats.get("recovery_success_rate", 100.0)
+    rec_rate = summary_stats.get("recovery_success_rate")
+    total_recoveries = summary_stats.get("total_recoveries", 0)
+    failed_recoveries = summary_stats.get("failed_recoveries", 0)
+    recovery_rate_label = f"{rec_rate:.1f}%" if rec_rate is not None else "N/A"
+    recovery_delta = f"{rec_rate:.0f}% success" if rec_rate is not None else "No attempts"
     render_metric_card(
         title="Active Model & Recovery",
         value=f"{active_ver} ({active_f1})",
-        subtitle=f"Recovery Success Rate: {rec_rate:.1f}%",
-        delta=f"{rec_rate:.0f}% SLA",
-        is_positive_delta=(rec_rate >= 90.0),
+        subtitle=f"Recovery Success Rate: {recovery_rate_label} · {failed_recoveries} failed / {total_recoveries} attempts",
+        delta=recovery_delta,
+        is_positive_delta=(rec_rate >= 90.0) if rec_rate is not None else False,
     )
 
 st.markdown("<div style='height: 16px;'></div>", unsafe_allow_html=True)
