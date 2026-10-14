@@ -166,6 +166,14 @@ with st.expander("🧾 Inspect recent pipeline runs", expanded=False):
             use_container_width=True,
             hide_index=True,
         )
+        csv_data = runs_df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "⬇️ Download filtered runs (CSV)",
+            data=csv_data,
+            file_name="pipeline_run_history.csv",
+            mime="text/csv",
+            key="download_filtered_pipeline_runs",
+        )
     else:
         st.caption("No pipeline runs are currently recorded.")
 
