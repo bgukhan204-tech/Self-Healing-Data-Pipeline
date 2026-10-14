@@ -110,8 +110,15 @@ with st.expander("🚨 Inspect recent anomaly detections", expanded=False):
         key="anomaly_min_score_filter",
         help="Show only detections at or above this score.",
     )
+    anomaly_history_limit = st.selectbox(
+        "Maximum recent detections",
+        options=[10, 20, 50, 100],
+        index=1,
+        key="anomaly_history_limit",
+        help="Choose how many recent detections to inspect or export.",
+    )
     anomaly_events = get_recent_anomaly_events(
-        limit=20,
+        limit=anomaly_history_limit,
         db_path=settings.database_path,
         run_id=anomaly_run_filter,
         search=anomaly_search,

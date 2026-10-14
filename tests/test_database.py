@@ -416,6 +416,35 @@ def test_recent_anomaly_query_filters_by_run_and_safe_metadata(temp_db):
 
 
 
+
+def test_recent_anomaly_query_respects_requested_limit(temp_db):
+    """Anomaly investigation history should return no more than the requested limit."""
+    log_pipeline_run(
+        run_id="run_anomaly_limit",
+        dataset_name="limit.csv",
+        records_total=4,
+        records_valid=4,
+        records_quarantined=0,
+        records_anomalous=4,
+        quality_score=90.0,
+        status="Warning",
+        execution_time_ms=10.0,
+        db_path=temp_db,
+    )
+    log_anomaly_events(
+        run_id="run_anomaly_limit",
+        anomalies=[
+            {"record_index": index, "anomaly_score": 0.5 + index / 10,
+             "detector_method": "iforest", "top_contributing_feature": "amount"}
+            for index in range(4)
+        ],
+        db_path=temp_db,
+    )
+
+    events = get_recent_anomaly_events(limit=2, db_path=temp_db)
+
+    assert len(events) == 2
+
 def test_recent_anomaly_query_filters_by_minimum_score(temp_db):
     """Minimum-score filtering should exclude lower-scored anomalies."""
     log_pipeline_run(
