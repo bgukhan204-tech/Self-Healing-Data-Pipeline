@@ -14,6 +14,7 @@ from src.database import (
     log_anomaly_events,
     log_drift_events,
     log_pipeline_run,
+    log_recovery_action,
     log_system_event,
 )
 from src.drift_detection import DatasetDriftReport, DriftMonitor
@@ -279,8 +280,18 @@ class PipelineOrchestrator:
                             error_details=error_message,
                             db_path=self.settings.database_path,
                         )
+                        recovery_action_id = log_recovery_action(
+                            trigger_event=d.trigger.value,
+                            action_type=d.recommended_action.value,
+                            status="FAILED",
+                            outcome_summary=summary,
+                            run_id=run_id,
+                            attempts=1,
+                            error_details=error_message,
+                            db_path=self.settings.database_path,
+                        )
                         rec_res = RecoveryExecutionResult(
-                            action_id=f"recovery-error-{run_id}",
+                            action_id=recovery_action_id,
                             trigger=d.trigger.value,
                             action_type=d.recommended_action.value,
                             status="FAILED",
