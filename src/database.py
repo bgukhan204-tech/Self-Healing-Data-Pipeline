@@ -199,10 +199,20 @@ def log_pipeline_run(
     with get_connection(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT OR REPLACE INTO pipeline_runs (
+            INSERT INTO pipeline_runs (
                 run_id, dataset_name, records_total, records_valid, records_quarantined,
                 records_anomalous, quality_score, status, execution_time_ms, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(run_id) DO UPDATE SET
+                dataset_name = excluded.dataset_name,
+                records_total = excluded.records_total,
+                records_valid = excluded.records_valid,
+                records_quarantined = excluded.records_quarantined,
+                records_anomalous = excluded.records_anomalous,
+                quality_score = excluded.quality_score,
+                status = excluded.status,
+                execution_time_ms = excluded.execution_time_ms,
+                created_at = excluded.created_at
         """, (
             run_id, dataset_name, records_total, records_valid, records_quarantined,
             records_anomalous, quality_score, status, execution_time_ms, now_utc
