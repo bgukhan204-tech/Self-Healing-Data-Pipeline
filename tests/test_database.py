@@ -758,3 +758,60 @@ def test_anomaly_score_bands_count_numeric_visible_scores_only():
     }
     assert sum(band_counts.values()) == len(score_values)
 
+
+def test_anomaly_investigation_filters_detector_and_inclusive_utc_dates():
+    from src.anomaly_utils import prepare_anomaly_investigation
+    import pandas as pd
+
+    rows = pd.DataFrame({
+        "Recorded At": [
+            "2026-10-10T00:00:00Z",
+            "2026-10-11T23:59:00Z",
+            "2026-10-12T00:00:00Z",
+        ],
+        "Anomaly Score": [0.2, 0.8, 0.5],
+        "Detector": ["iforest", "iforest", "lof"],
+    })
+    visible = prepare_anomaly_investigation(
+        rows, detector="iforest", start_date=pd.Timestamp("2026-10-10").date(),
+        end_date=pd.Timestamp("2026-10-11").date(),
+    )
+
+    assert visible["Anomaly Score"].tolist() == [0.8, 0.2]
+    assert visible["Severity Band"].tolist() == ["High", "Low"]
+
+
+def test_anomaly_investigation_can_sort_by_highest_score_and_unknown_band():
+    from src.anomaly_utils import prepare_anomaly_investigation
+    import pandas as pd
+
+    rows = pd.DataFrame({
+        "Recorded At": ["2026-10-10T00:00:00Z"] * 3,
+        "Anomaly Score": ["invalid", 0.3, 0.9],
+        "Detector": ["iforest"] * 3,
+    })
+    visible = prepare_anomaly_investigation(rows, sort_by="Highest score first")
+
+    assert visible["Anomaly Score"].iloc[:2].tolist() == [0.9, 0.3]
+    assert visible["Severity Band"].tolist() == ["High", "Low", "Unknown"]
+
+
+def test_anomaly_score_summary_reports_metrics_and_score_bands():
+    from src.anomaly_utils import build_anomaly_score_summary, prepare_anomaly_investigation
+    import pandas as pd
+
+    rows = pd.DataFrame({
+        "Recorded At": ["2026-10-10T00:00:00Z"] * 4,
+        "Anomaly Score": [0.2, 0.5, 0.8, "invalid"],
+        "Detector": ["iforest"] * 4,
+    })
+    visible = prepare_anomaly_investigation(rows)
+    summary = build_anomaly_score_summary(visible).set_index("Metric")["Value"]
+
+    assert summary["Displayed detections"] == 3
+    assert summary["Low detections"] == 1
+    assert summary["Moderate detections"] == 1
+    assert summary["High detections"] == 1
+    assert summary["Unknown-score detections"] == 1
+    assert summary["Highest score"] == 0.8
+
