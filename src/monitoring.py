@@ -134,6 +134,20 @@ class PipelineOrchestrator:
         # 1. Validation & Quarantine
         val_report = validate_dataset(df, dataset_name=dataset_name)
 
+        # Create the parent run row before anomaly/drift child events are persisted.
+        # The final call below updates this row without deleting its child records.
+        log_pipeline_run(
+            run_id=run_id,
+            dataset_name=dataset_name,
+            records_total=val_report.total_records,
+            records_valid=val_report.valid_records_count,
+            records_quarantined=val_report.quarantined_records_count,
+            records_anomalous=0,
+            quality_score=val_report.quality_score,
+            status="Processing",
+            execution_time_ms=0.0,
+        )
+
         if val_report.quarantined_records_count > 0:
             quar_exec = self.recovery_engine.execute_quarantine(
                 quarantined_df=val_report.quarantined_df,
