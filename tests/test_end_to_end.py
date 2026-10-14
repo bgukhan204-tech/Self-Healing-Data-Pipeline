@@ -34,7 +34,6 @@ def test_full_pipeline_end_to_end(tmp_path, monkeypatch):
     res_clean = orchestrator.process_incoming_batch(clean_batch, dataset_name="e2e_clean.csv")
     
     if res_clean.status != "Healthy":
-        from src.database import get_system_events
         monitoring_errors = get_system_events(
             severity="ERROR",
             limit=20,
