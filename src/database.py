@@ -484,17 +484,38 @@ def get_recent_drift_events(
 def get_recent_anomaly_events(
     limit: int = 20,
     db_path: Optional[Path] = None,
+    run_id: Optional[str] = None,
+    search: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Retrieve recent anomaly detections without exposing full record payloads."""
+    """Retrieve recent anomaly detections, optionally filtered for investigation.
+
+    Searches only safe metadata fields and never returns the stored record payload.
+    """
+    query = """
+        SELECT id, run_id, record_index, anomaly_score, detector_method,
+               top_contributing_feature, created_at
+        FROM anomaly_events
+    """
+    conditions: List[str] = []
+    params: List[Any] = []
+    if run_id and run_id.strip():
+        conditions.append("run_id = ?")
+        params.append(run_id.strip())
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        conditions.append(
+            "(run_id LIKE ? OR detector_method LIKE ? "
+            "OR top_contributing_feature LIKE ?)"
+        )
+        params.extend([pattern, pattern, pattern])
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+    query += " ORDER BY datetime(created_at) DESC, id DESC LIMIT ?"
+    params.append(max(1, int(limit)))
+
     with get_connection(db_path) as conn:
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT id, run_id, record_index, anomaly_score, detector_method,
-                   top_contributing_feature, created_at
-            FROM anomaly_events
-            ORDER BY datetime(created_at) DESC, id DESC
-            LIMIT ?
-        """, (max(1, int(limit)),))
+        cursor.execute(query, params)
         return [dict(row) for row in cursor.fetchall()]
 
 
