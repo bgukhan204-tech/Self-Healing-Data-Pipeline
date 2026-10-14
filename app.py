@@ -146,6 +146,21 @@ with st.expander("🚨 Inspect recent anomaly detections", expanded=False):
             score_col3.metric("Median anomaly score", f"{score_values.median():.3f}")
             score_col4.metric("95th percentile", f"{score_values.quantile(0.95):.3f}")
             score_col5.metric("Highest anomaly score", f"{score_values.max():.3f}")
+
+            # Make score severity visible without changing detection or recovery decisions.
+            score_band_counts = pd.Series({
+                "Low (< 0.40)": int((score_values < 0.40).sum()),
+                "Moderate (0.40–0.69)": int(
+                    ((score_values >= 0.40) & (score_values < 0.70)).sum()
+                ),
+                "High (≥ 0.70)": int((score_values >= 0.70).sum()),
+            }, name="Detection Count").rename_axis("Score Band").reset_index()
+            st.caption("Score bands summarize the displayed numeric detections only; they do not trigger recovery actions.")
+            st.dataframe(
+                score_band_counts,
+                use_container_width=True,
+                hide_index=True,
+            )
             score_distribution = px.histogram(
                 pd.DataFrame({"Anomaly Score": score_values}),
                 x="Anomaly Score",
