@@ -144,6 +144,22 @@ with st.expander("🚨 Inspect recent anomaly detections", expanded=False):
             score_col1.metric("Displayed detections", len(score_values))
             score_col2.metric("Average anomaly score", f"{score_values.mean():.3f}")
             score_col3.metric("Highest anomaly score", f"{score_values.max():.3f}")
+            score_distribution = px.histogram(
+                pd.DataFrame({"Anomaly Score": score_values}),
+                x="Anomaly Score",
+                nbins=10,
+                title="Anomaly Score Distribution",
+            )
+            score_distribution.update_layout(
+                xaxis_title="Anomaly Score",
+                yaxis_title="Detection Count",
+                showlegend=False,
+            )
+            st.plotly_chart(
+                score_distribution,
+                use_container_width=True,
+                key="anomaly_score_distribution",
+            )
         feature_counts = (
             visible_anomalies["Top Contributing Feature"]
             .fillna("")

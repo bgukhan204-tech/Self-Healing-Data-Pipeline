@@ -669,3 +669,18 @@ def test_anomaly_feature_breakdown_uses_displayed_rows_and_ignores_blanks():
     assert counts["credit_score"] == 1
     assert counts["transaction_amount"] == 1
     assert "None" not in counts
+
+
+def test_anomaly_score_distribution_input_excludes_invalid_scores():
+    """Score distribution should receive numeric scores from visible rows only."""
+    import pandas as pd
+
+    visible_anomalies = pd.DataFrame({
+        "Anomaly Score": [0.1, 0.2, "invalid", None, 0.95]
+    })
+    score_values = pd.to_numeric(
+        visible_anomalies["Anomaly Score"], errors="coerce"
+    ).dropna()
+
+    assert score_values.tolist() == [0.1, 0.2, 0.95]
+    assert score_values.between(0.0, 1.0).all()
