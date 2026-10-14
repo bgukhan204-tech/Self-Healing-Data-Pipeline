@@ -445,6 +445,24 @@ def get_recovery_actions(limit: int = 50, db_path: Optional[Path] = None) -> Lis
         return [dict(row) for row in cursor.fetchall()]
 
 
+def get_recent_drift_events(
+    limit: int = 20,
+    db_path: Optional[Path] = None,
+) -> List[Dict[str, Any]]:
+    """Retrieve recent detected drift events with feature-level diagnostics."""
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, run_id, feature_name, test_method, statistic,
+                   p_value, severity, created_at
+            FROM drift_events
+            WHERE drift_detected = 1
+            ORDER BY datetime(created_at) DESC, id DESC
+            LIMIT ?
+        """, (max(1, int(limit)),))
+        return [dict(row) for row in cursor.fetchall()]
+
+
 def get_recent_failed_recoveries(
     limit: int = 20,
     db_path: Optional[Path] = None,

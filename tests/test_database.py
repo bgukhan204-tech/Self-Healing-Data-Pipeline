@@ -9,6 +9,7 @@ from src.database import (
     get_latest_metrics_summary,
     get_model_history,
     get_pipeline_runs,
+    get_recent_drift_events,
     get_recent_failed_recoveries,
     get_recovery_actions,
     get_system_events,
@@ -247,3 +248,52 @@ def test_recent_failed_recoveries_include_actionable_details_and_exclude_success
     assert failures[0]["action_type"] == "RETRAIN_MODEL"
     assert failures[0]["outcome_summary"] == "Candidate training crashed."
     assert failures[0]["error_details"] == "ValueError: target column missing"
+
+
+
+def test_recent_drift_query_returns_detected_events_only(temp_db):
+    """Recent drift inspection should include detected features and exclude clean ones."""
+    log_pipeline_run(
+        run_id="run_drift_details",
+        dataset_name="drift.csv",
+        records_total=10,
+        records_valid=10,
+        records_quarantined=0,
+        records_anomalous=0,
+        quality_score=100.0,
+        status="Warning",
+        execution_time_ms=10.0,
+        db_path=temp_db,
+    )
+    from src.database import log_drift_events
+
+    log_drift_events(
+        run_id="run_drift_details",
+        drift_results=[
+            {
+                "feature_name": "temperature",
+                "test_method": "ks_test",
+                "statistic": 0.42,
+                "p_value": 0.01,
+                "drift_detected": True,
+                "severity": "CRITICAL",
+            },
+            {
+                "feature_name": "humidity",
+                "test_method": "ks_test",
+                "statistic": 0.08,
+                "p_value": 0.70,
+                "drift_detected": False,
+                "severity": "HEALTHY",
+            },
+        ],
+        db_path=temp_db,
+    )
+
+    events = get_recent_drift_events(limit=10, db_path=temp_db)
+
+    assert len(events) == 1
+    assert events[0]["run_id"] == "run_drift_details"
+    assert events[0]["feature_name"] == "temperature"
+    assert events[0]["severity"] == "CRITICAL"
+    assert events[0]["p_value"] == 0.01
