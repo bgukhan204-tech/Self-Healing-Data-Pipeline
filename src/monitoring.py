@@ -144,6 +144,9 @@ class PipelineOrchestrator:
 
         records_to_process = val_report.valid_df
         
+        # Monitoring failures must affect the final run status.
+        monitoring_failed = False
+
         # 2. Anomaly Detection (Isolation Forest)
         anomaly_res = None
         records_anomalous = 0
@@ -165,6 +168,7 @@ class PipelineOrchestrator:
                         })
                     log_anomaly_events(run_id=run_id, anomalies=anom_payloads)
             except Exception as e:
+                monitoring_failed = True
                 log_system_event(
                     event_type="ANOMALY_DETECTION_ERROR",
                     severity="ERROR",
@@ -194,6 +198,7 @@ class PipelineOrchestrator:
                     })
                 log_drift_events(run_id=run_id, drift_results=drift_db_items)
             except Exception as e:
+                monitoring_failed = True
                 log_system_event(
                     event_type="DRIFT_DETECTION_ERROR",
                     severity="ERROR",
@@ -229,6 +234,8 @@ class PipelineOrchestrator:
             status = "Warning"
         elif any(e.action_type in ["TRIGGER_RETRAINING", "ROLLBACK_MODEL"] for e in recovery_executions):
             status = "Recovering"
+        elif monitoring_failed:
+            status = "Warning"
         elif drift_status in ["WARNING", "CRITICAL"] or val_report.quarantined_records_count > 0:
             status = "Warning"
         else:
