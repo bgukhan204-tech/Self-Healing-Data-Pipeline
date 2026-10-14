@@ -47,6 +47,15 @@ render_header(
     current_status=current_status,
 )
 
+# Surface recent recovery failures instead of leaving them only in the audit history.
+failed_recoveries_24h = summary_stats.get("failed_recoveries_24h", 0)
+if failed_recoveries_24h:
+    st.warning(
+        f"Recovery attention required: {failed_recoveries_24h} failed recovery "
+        f"action(s) recorded in the last 24 hours. Review the recovery outcomes "
+        f"and audit trail below."
+    )
+
 # Hero Description Banner
 st.markdown(
     """

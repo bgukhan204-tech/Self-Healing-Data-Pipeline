@@ -509,6 +509,17 @@ def get_latest_metrics_summary(db_path: Optional[Path] = None) -> Dict[str, Any]
         row["successful_recoveries"] = succ_rec
         row["failed_recoveries"] = failed_rec
 
+        cursor.execute("""
+            SELECT COUNT(*) AS failed_recoveries_24h
+            FROM recovery_actions
+            WHERE status = 'FAILED'
+              AND datetime(created_at) >= datetime('now', '-24 hours')
+        """)
+        recent_failures_row = cursor.fetchone()
+        row["failed_recoveries_24h"] = (
+            recent_failures_row["failed_recoveries_24h"] if recent_failures_row else 0
+        )
+
         # Get latest drift count
         cursor.execute("""
             SELECT COUNT(*) as drifted_count 
