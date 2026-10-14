@@ -18,6 +18,7 @@ from src.database import (
     get_latest_metrics_summary,
     get_model_history,
     get_pipeline_runs,
+    get_recent_failed_recoveries,
     get_recovery_actions,
     get_system_events,
 )
@@ -55,6 +56,36 @@ if failed_recoveries_24h:
         f"action(s) recorded in the last 24 hours. Review the recovery outcomes "
         f"and audit trail below."
     )
+
+# Show actionable context for failed recoveries, not just an aggregate count.
+if summary_stats.get("failed_recoveries", 0):
+    with st.expander("🔎 Inspect recent failed recovery actions", expanded=False):
+        failed_actions = get_recent_failed_recoveries(
+            limit=20, db_path=settings.database_path
+        )
+        if failed_actions:
+            failed_df = pd.DataFrame(failed_actions)
+            failed_df = failed_df.rename(columns={
+                "action_id": "Action ID",
+                "run_id": "Pipeline Run",
+                "trigger_event": "Trigger",
+                "action_type": "Recovery Action",
+                "attempts": "Attempts",
+                "outcome_summary": "Outcome",
+                "error_details": "Error Details",
+                "created_at": "Recorded At",
+            })
+            visible_columns = [
+                "Recorded At", "Pipeline Run", "Trigger", "Recovery Action",
+                "Attempts", "Outcome", "Error Details",
+            ]
+            st.dataframe(
+                failed_df[visible_columns].fillna(""),
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.caption("No failed recovery actions are currently recorded.")
 
 # Hero Description Banner
 st.markdown(
