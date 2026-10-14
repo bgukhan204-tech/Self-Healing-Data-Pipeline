@@ -243,10 +243,17 @@ class PipelineOrchestrator:
         # 5. Autonomous Recovery Execution if in Automatic Mode
         if is_auto_mode:
             for d in decisions:
-                if d.recommended_action == "TRIGGER_RETRAINING" and self.reference_data is not None:
-                    # Execute retraining triggered by drift
+                # Retrain automatically only for critical drift. Warnings remain visible
+                # but must not launch a potentially disruptive training cycle.
+                if (
+                    d.recommended_action == "TRIGGER_RETRAINING"
+                    and d.can_auto_execute
+                    and drift_status == "CRITICAL"
+                ):
+                    # Supervised retraining must use incoming labeled data, not the old
+                    # reference baseline. RecoveryEngine validates suitability before training.
                     rec_res = self.recovery_engine.execute_drift_retraining(
-                        training_df=self.reference_data,
+                        training_df=records_to_process,
                         force=False,
                         run_id=run_id,
                     )
