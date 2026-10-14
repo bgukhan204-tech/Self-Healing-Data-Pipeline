@@ -388,6 +388,7 @@ class RecoveryEngine:
                     status="SKIPPED",
                     outcome_summary=msg,
                     run_id=run_id,
+                    db_path=self.settings.database_path,
                 )
                 return RecoveryExecutionResult(
                     action_id=action_id,
