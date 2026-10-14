@@ -1,6 +1,4 @@
 """Regression tests for guarded automatic retraining after drift."""
-from types import SimpleNamespace
-
 import pandas as pd
 import pytest
 
@@ -76,4 +74,4 @@ def test_retraining_skips_too_small_or_single_class_data(engine, monkeypatch):
     )
 
     assert result.status == "SKIPPED"
-    assert "at least 40 labeled rows" in result.outcome_summary
+    assert "at least 40 complete labeled rows" in result.outcome_summary
