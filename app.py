@@ -146,6 +146,7 @@ with st.expander("🚨 Inspect recent anomaly detections", expanded=False):
             score_col3.metric("Highest anomaly score", f"{score_values.max():.3f}")
         feature_counts = (
             visible_anomalies["Top Contributing Feature"]
+            .fillna("")
             .astype(str)
             .str.strip()
             .replace("", pd.NA)
