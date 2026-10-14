@@ -9,6 +9,7 @@ from src.database import (
     get_latest_metrics_summary,
     get_model_history,
     get_pipeline_runs,
+    get_recent_anomaly_events,
     get_recent_drift_events,
     get_recent_failed_recoveries,
     get_recovery_actions,
@@ -249,6 +250,51 @@ def test_recent_failed_recoveries_include_actionable_details_and_exclude_success
     assert failures[0]["outcome_summary"] == "Candidate training crashed."
     assert failures[0]["error_details"] == "ValueError: target column missing"
 
+
+
+def test_recent_anomaly_query_returns_safe_investigation_fields_and_respects_limit(temp_db):
+    """Recent anomaly query exposes useful metadata but not raw record payloads."""
+    log_pipeline_run(
+        run_id="run_anomaly_details",
+        dataset_name="anomaly.csv",
+        records_total=10,
+        records_valid=10,
+        records_quarantined=0,
+        records_anomalous=2,
+        quality_score=90.0,
+        status="Warning",
+        execution_time_ms=10.0,
+        db_path=temp_db,
+    )
+    log_anomaly_events(
+        run_id="run_anomaly_details",
+        anomalies=[
+            {
+                "record_index": 3,
+                "anomaly_score": 0.91,
+                "detector_method": "isolation_forest",
+                "top_contributing_feature": "credit_score",
+                "record_payload": {"credit_score": 120},
+            },
+            {
+                "record_index": 7,
+                "anomaly_score": 0.82,
+                "detector_method": "isolation_forest",
+                "top_contributing_feature": "debt_to_income",
+                "record_payload": {"debt_to_income": 9.5},
+            },
+        ],
+        db_path=temp_db,
+    )
+
+    events = get_recent_anomaly_events(limit=1, db_path=temp_db)
+
+    assert len(events) == 1
+    assert events[0]["run_id"] == "run_anomaly_details"
+    assert events[0]["record_index"] in {3, 7}
+    assert "anomaly_score" in events[0]
+    assert "top_contributing_feature" in events[0]
+    assert "record_payload" not in events[0]
 
 
 def test_recent_drift_query_returns_detected_events_only(temp_db):
