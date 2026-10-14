@@ -405,7 +405,10 @@ def get_pipeline_runs(limit: int = 50, db_path: Optional[Path] = None) -> List[D
             ORDER BY created_at DESC
             LIMIT ?
         """, (max(1, int(limit)),))
-        return [dict(row) for row in cursor.fetchall()(
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_system_events(
     severity: Optional[str] = None,
     event_type: Optional[str] = None,
     limit: int = 100,
