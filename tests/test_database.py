@@ -9,6 +9,7 @@ from src.database import (
     get_latest_metrics_summary,
     get_model_history,
     get_pipeline_runs,
+    get_recent_failed_recoveries,
     get_recovery_actions,
     get_system_events,
     init_db,
@@ -214,3 +215,35 @@ def test_recovery_metrics_count_only_recent_failed_actions(temp_db):
 
     assert summary["failed_recoveries"] == 2
     assert summary["failed_recoveries_24h"] == 1
+
+
+
+def test_recent_failed_recoveries_include_actionable_details_and_exclude_successes(temp_db):
+    """Failure inspection query should return useful fields and only failed actions."""
+    log_recovery_action(
+        trigger_event="DRIFT_CRITICAL",
+        action_type="RETRAIN_MODEL",
+        status="FAILED",
+        outcome_summary="Candidate training crashed.",
+        error_details="ValueError: target column missing",
+        run_id="run_failed_detail",
+        db_path=temp_db,
+    )
+    log_recovery_action(
+        trigger_event="DRIFT_WARNING",
+        action_type="RETRAIN_MODEL",
+        status="SUCCESS",
+        outcome_summary="Training succeeded.",
+        run_id="run_success_detail",
+        db_path=temp_db,
+    )
+
+    failures = get_recent_failed_recoveries(limit=10, db_path=temp_db)
+
+    assert len(failures) == 1
+    assert failures[0]["status"] == "FAILED"
+    assert failures[0]["run_id"] == "run_failed_detail"
+    assert failures[0]["trigger_event"] == "DRIFT_CRITICAL"
+    assert failures[0]["action_type"] == "RETRAIN_MODEL"
+    assert failures[0]["outcome_summary"] == "Candidate training crashed."
+    assert failures[0]["error_details"] == "ValueError: target column missing"
