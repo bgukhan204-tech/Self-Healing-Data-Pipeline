@@ -33,7 +33,17 @@ def test_full_pipeline_end_to_end(tmp_path, monkeypatch):
     clean_batch = generate_synthetic_dataset(n_samples=150, random_seed=77)
     res_clean = orchestrator.process_incoming_batch(clean_batch, dataset_name="e2e_clean.csv")
     
-    assert res_clean.status == "Healthy"
+    if res_clean.status != "Healthy":
+        from src.database import get_system_events
+        monitoring_errors = get_system_events(
+            severity="ERROR",
+            limit=20,
+            db_path=db_file,
+        )
+        pytest.fail(
+            "Clean batch was expected to be Healthy but got "
+            f"{res_clean.status}. Recent system errors: {monitoring_errors}"
+        )
     assert res_clean.records_total == 150
     assert res_clean.records_quarantined == 0
     assert res_clean.quality_score >= 90.0
