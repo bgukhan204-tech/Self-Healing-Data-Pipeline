@@ -201,8 +201,16 @@ class RecoveryEngine:
         """
         Execute an operation with bounded retries and exponential backoff.
         """
-        max_attempts = max_attempts or self.settings.max_retry_attempts
-        backoff = backoff_sec or self.settings.retry_backoff_seconds
+        max_attempts = (
+            self.settings.max_retry_attempts if max_attempts is None else max_attempts
+        )
+        backoff = (
+            self.settings.retry_backoff_seconds if backoff_sec is None else backoff_sec
+        )
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be at least 1")
+        if backoff < 0:
+            raise ValueError("backoff_sec must be non-negative")
         last_error = None
 
         for attempt in range(1, max_attempts + 1):
