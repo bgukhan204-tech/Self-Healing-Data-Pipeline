@@ -297,6 +297,75 @@ def test_recent_anomaly_query_returns_safe_investigation_fields_and_respects_lim
     assert "record_payload" not in events[0]
 
 
+
+
+def test_recent_anomaly_query_filters_by_run_and_safe_metadata(temp_db):
+    """Anomaly investigation filters should combine safely and match metadata."""
+    for run_id, dataset_name in [
+        ("run_anomaly_alpha", "alpha.csv"),
+        ("run_anomaly_beta", "beta.csv"),
+    ]:
+        log_pipeline_run(
+            run_id=run_id,
+            dataset_name=dataset_name,
+            records_total=5,
+            records_valid=5,
+            records_quarantined=0,
+            records_anomalous=1,
+            quality_score=90.0,
+            status="Warning",
+            execution_time_ms=10.0,
+            db_path=temp_db,
+        )
+
+    log_anomaly_events(
+        run_id="run_anomaly_alpha",
+        anomalies=[{
+            "record_index": 1,
+            "anomaly_score": 0.91,
+            "detector_method": "isolation_forest",
+            "top_contributing_feature": "credit_score",
+            "record_payload": {"private_value": "do not expose"},
+        }],
+        db_path=temp_db,
+    )
+    log_anomaly_events(
+        run_id="run_anomaly_beta",
+        anomalies=[{
+            "record_index": 2,
+            "anomaly_score": 0.87,
+            "detector_method": "local_outlier_factor",
+            "top_contributing_feature": "transaction_amount",
+            "record_payload": {"private_value": "do not expose"},
+        }],
+        db_path=temp_db,
+    )
+
+    by_run = get_recent_anomaly_events(
+        limit=20, db_path=temp_db, run_id="run_anomaly_alpha"
+    )
+    by_feature = get_recent_anomaly_events(
+        limit=20, db_path=temp_db, search="transaction_amount"
+    )
+    combined = get_recent_anomaly_events(
+        limit=20,
+        db_path=temp_db,
+        run_id="run_anomaly_alpha",
+        search="local_outlier_factor",
+    )
+    injection_like = get_recent_anomaly_events(
+        limit=20, db_path=temp_db, search="' OR 1=1 --"
+    )
+
+    assert len(by_run) == 1
+    assert by_run[0]["run_id"] == "run_anomaly_alpha"
+    assert len(by_feature) == 1
+    assert by_feature[0]["run_id"] == "run_anomaly_beta"
+    assert combined == []
+    assert injection_like == []
+    assert all("record_payload" not in event for event in by_run + by_feature)
+
+
 def test_recent_drift_query_returns_detected_events_only(temp_db):
     """Recent drift inspection should include detected features and exclude clean ones."""
     log_pipeline_run(
