@@ -122,6 +122,34 @@ if drift_events_24h:
         else:
             st.caption("No detected drift events are currently recorded.")
 
+# Provide an operator-friendly run history view with quality and processing outcomes.
+with st.expander("🧾 Inspect recent pipeline runs", expanded=False):
+    recent_runs = get_pipeline_runs(limit=20, db_path=settings.database_path)
+    if recent_runs:
+        runs_df = pd.DataFrame(recent_runs).rename(columns={
+            "run_id": "Run ID",
+            "dataset_name": "Dataset",
+            "records_total": "Total Records",
+            "records_valid": "Valid Records",
+            "records_quarantined": "Quarantined",
+            "records_anomalous": "Anomalies",
+            "quality_score": "Quality Score (%)",
+            "status": "Status",
+            "execution_time_ms": "Duration (ms)",
+            "created_at": "Recorded At",
+        })
+        st.dataframe(
+            runs_df[[
+                "Recorded At", "Run ID", "Dataset", "Status", "Total Records",
+                "Valid Records", "Quarantined", "Anomalies", "Quality Score (%)",
+                "Duration (ms)",
+            ]].fillna(""),
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.caption("No pipeline runs are currently recorded.")
+
 # Hero Description Banner
 st.markdown(
     """

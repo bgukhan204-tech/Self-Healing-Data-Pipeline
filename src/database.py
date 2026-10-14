@@ -404,7 +404,7 @@ def get_pipeline_runs(limit: int = 50, db_path: Optional[Path] = None) -> List[D
             FROM pipeline_runs
             ORDER BY created_at DESC
             LIMIT ?
-        """, (limit,))
+        """, (max(1, int(limit)),))
         return [dict(row) for row in cursor.fetchall()]
 
 

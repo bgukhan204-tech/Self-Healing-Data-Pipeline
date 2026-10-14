@@ -297,3 +297,30 @@ def test_recent_drift_query_returns_detected_events_only(temp_db):
     assert events[0]["feature_name"] == "temperature"
     assert events[0]["severity"] == "CRITICAL"
     assert events[0]["p_value"] == 0.01
+
+
+def test_pipeline_run_query_bounds_limit_and_returns_run_details(temp_db):
+    """Run history query should cap results and expose operational run metrics."""
+    for index in range(3):
+        log_pipeline_run(
+            run_id=f"run_history_{index}",
+            dataset_name=f"batch_{index}.csv",
+            records_total=10 + index,
+            records_valid=9 + index,
+            records_quarantined=1,
+            records_anomalous=index,
+            quality_score=90.0 + index,
+            status="Healthy" if index else "Warning",
+            execution_time_ms=100.0 + index,
+            db_path=temp_db,
+        )
+
+    runs = get_pipeline_runs(limit=2, db_path=temp_db)
+    assert len(runs) == 2
+    assert {run["run_id"] for run in runs}.issubset(
+        {"run_history_0", "run_history_1", "run_history_2"}
+    )
+    assert {"dataset_name", "records_total", "records_quarantined", "quality_score", "status"}.issubset(runs[0])
+
+    bounded_runs = get_pipeline_runs(limit=0, db_path=temp_db)
+    assert len(bounded_runs) == 1
