@@ -340,10 +340,17 @@ class RecoveryEngine:
                 attempts=0,
                 outcome_summary=msg,
             )
-        if len(training_df) < 40 or training_df[TARGET_COLUMN].nunique(dropna=True) < 2:
+        target_values = training_df[TARGET_COLUMN]
+        class_counts = target_values.dropna().value_counts()
+        if (
+            len(training_df) < 40
+            or target_values.isna().any()
+            or len(class_counts) < 2
+            or (not class_counts.empty and class_counts.min() < 2)
+        ):
             msg = (
-                "Retraining skipped: at least 40 labeled rows and two target classes "
-                "are required for a reliable stratified candidate evaluation."
+                "Retraining skipped: at least 40 complete labeled rows and two target "
+                "classes with at least two examples each are required for stratified evaluation."
             )
             action_id = log_recovery_action(
                 trigger_event=RecoveryTrigger.DATA_DRIFT_DETECTED.value,
