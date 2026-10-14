@@ -91,8 +91,21 @@ if summary_stats.get("failed_recoveries", 0):
 
 # Surface recent anomaly detections for operator investigation.
 with st.expander("🚨 Inspect recent anomaly detections", expanded=False):
+    anomaly_run_filter = st.text_input(
+        "Filter by exact pipeline run ID",
+        key="anomaly_run_filter",
+        placeholder="e.g. run_abc123",
+    )
+    anomaly_search = st.text_input(
+        "Search run ID, detector, or contributing feature",
+        key="anomaly_metadata_search",
+        placeholder="e.g. isolation_forest or customer_age",
+    )
     anomaly_events = get_recent_anomaly_events(
-        limit=20, db_path=settings.database_path
+        limit=20,
+        db_path=settings.database_path,
+        run_id=anomaly_run_filter,
+        search=anomaly_search,
     )
     if anomaly_events:
         anomaly_df = pd.DataFrame(anomaly_events).rename(columns={
@@ -112,7 +125,7 @@ with st.expander("🚨 Inspect recent anomaly detections", expanded=False):
             hide_index=True,
         )
     else:
-        st.caption("No anomaly detections are currently recorded.")
+        st.caption("No anomaly detections match the current filters.")
 
 # Surface recent feature-level drift detections for faster investigation.
 drift_events_24h = summary_stats.get("drift_events_24h", 0)
