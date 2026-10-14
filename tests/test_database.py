@@ -415,6 +415,41 @@ def test_recent_anomaly_query_filters_by_run_and_safe_metadata(temp_db):
     assert all("record_payload" not in event for event in by_run + by_feature)
 
 
+
+def test_recent_anomaly_query_filters_by_minimum_score(temp_db):
+    """Minimum-score filtering should exclude lower-scored anomalies."""
+    log_pipeline_run(
+        run_id="run_score_filter",
+        dataset_name="scores.csv",
+        records_total=4,
+        records_valid=4,
+        records_quarantined=0,
+        records_anomalous=3,
+        quality_score=90.0,
+        status="Warning",
+        execution_time_ms=10.0,
+        db_path=temp_db,
+    )
+    log_anomaly_events(
+        run_id="run_score_filter",
+        anomalies=[
+            {"record_index": 0, "anomaly_score": 0.25, "detector_method": "iforest",
+             "top_contributing_feature": "age"},
+            {"record_index": 1, "anomaly_score": 0.75, "detector_method": "iforest",
+             "top_contributing_feature": "income"},
+            {"record_index": 2, "anomaly_score": 0.95, "detector_method": "iforest",
+             "top_contributing_feature": "balance"},
+        ],
+        db_path=temp_db,
+    )
+
+    events = get_recent_anomaly_events(
+        limit=20, db_path=temp_db, min_score=0.75
+    )
+
+    assert {event["record_index"] for event in events} == {1, 2}
+    assert all(event["anomaly_score"] >= 0.75 for event in events)
+
 def test_recent_drift_query_returns_detected_events_only(temp_db):
     """Recent drift inspection should include detected features and exclude clean ones."""
     log_pipeline_run(
