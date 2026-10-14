@@ -5,6 +5,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from src.anomaly_utils import build_anomaly_score_summary, prepare_anomaly_investigation
+
 st.set_page_config(
     page_title="Self-Healing Data Pipeline",
     page_icon="🛡️",
@@ -137,8 +139,43 @@ with st.expander("🚨 Inspect recent anomaly detections", expanded=False):
             "Recorded At", "Pipeline Run", "Record Index", "Anomaly Score",
             "Detector", "Top Contributing Feature",
         ]
-        visible_anomalies = anomaly_df[visible_anomaly_columns].fillna("")
-        score_values = pd.to_numeric(visible_anomalies["Anomaly Score"], errors="coerce").dropna()
+        base_anomalies = anomaly_df[visible_anomaly_columns].fillna("")
+        detector_options = ["All detectors"] + sorted(
+            value for value in base_anomalies["Detector"].astype(str).unique()
+            if value.strip()
+        )
+        filter_col1, filter_col2, filter_col3 = st.columns(3)
+        with filter_col1:
+            selected_detector = st.selectbox(
+                "Filter by detector", detector_options, key="anomaly_detector_filter"
+            )
+        with filter_col2:
+            date_start = st.date_input(
+                "From date (UTC)", value=None, key="anomaly_date_start"
+            )
+        with filter_col3:
+            date_end = st.date_input(
+                "Through date (UTC)", value=None, key="anomaly_date_end"
+            )
+        sort_choice = st.selectbox(
+            "Sort detections",
+            options=["Newest first", "Oldest first", "Highest score first"],
+            key="anomaly_sort_order",
+        )
+        if date_start is not None and date_end is not None and date_start > date_end:
+            st.warning("The start date is after the end date. Please correct the date range.")
+            visible_anomalies = base_anomalies.iloc[0:0].copy()
+        else:
+            visible_anomalies = prepare_anomaly_investigation(
+                base_anomalies,
+                detector=selected_detector,
+                start_date=date_start,
+                end_date=date_end,
+                sort_by=sort_choice,
+            )
+        score_values = pd.to_numeric(
+            visible_anomalies["Anomaly Score"], errors="coerce"
+        ).dropna()
         if not score_values.empty:
             score_col1, score_col2, score_col3, score_col4, score_col5 = st.columns(5)
             score_col1.metric("Displayed detections", len(score_values))
@@ -239,6 +276,14 @@ with st.expander("🚨 Inspect recent anomaly detections", expanded=False):
             file_name="anomaly_investigation.csv",
             mime="text/csv",
             key="download_filtered_anomaly_events",
+        )
+        summary_csv = build_anomaly_score_summary(visible_anomalies).to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "⬇️ Download anomaly score summary (CSV)",
+            data=summary_csv,
+            file_name="anomaly_score_summary.csv",
+            mime="text/csv",
+            key="download_anomaly_score_summary",
         )
     else:
         st.caption("No anomaly detections match the current filters.")
