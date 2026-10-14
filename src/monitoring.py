@@ -264,7 +264,11 @@ class PipelineOrchestrator:
             status = "Failed"
         elif recovery_executions and any(e.status == "FAILED" for e in recovery_executions):
             status = "Warning"
-        elif any(e.action_type in ["TRIGGER_RETRAINING", "ROLLBACK_MODEL"] for e in recovery_executions):
+        elif any(
+            e.action_type in ["TRIGGER_RETRAINING", "ROLLBACK_MODEL"]
+            and e.status == "SUCCESS"
+            for e in recovery_executions
+        ):
             status = "Recovering"
         elif monitoring_failed:
             status = "Warning"
