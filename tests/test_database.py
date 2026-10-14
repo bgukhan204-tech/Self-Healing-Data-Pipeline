@@ -684,3 +684,32 @@ def test_anomaly_score_distribution_input_excludes_invalid_scores():
 
     assert score_values.tolist() == [0.1, 0.2, 0.95]
     assert score_values.between(0.0, 1.0).all()
+
+
+
+def test_anomaly_score_timeline_sorts_timestamps_and_drops_invalid_dates():
+    """Timeline input should be chronological and omit rows without usable timestamps."""
+    import pandas as pd
+
+    visible_anomalies = pd.DataFrame({
+        "Recorded At": [
+            "2026-10-14T10:03:00+00:00",
+            "not-a-timestamp",
+            "2026-10-14T10:01:00+00:00",
+        ],
+        "Anomaly Score": [0.8, 0.99, 0.4],
+    })
+    score_values = pd.to_numeric(
+        visible_anomalies["Anomaly Score"], errors="coerce"
+    ).dropna()
+    score_timeline = pd.DataFrame({
+        "Recorded At": pd.to_datetime(
+            visible_anomalies.loc[score_values.index, "Recorded At"],
+            errors="coerce",
+            utc=True,
+        ),
+        "Anomaly Score": score_values,
+    }).dropna(subset=["Recorded At"]).sort_values("Recorded At")
+
+    assert score_timeline["Anomaly Score"].tolist() == [0.4, 0.8]
+    assert score_timeline["Recorded At"].is_monotonic_increasing
