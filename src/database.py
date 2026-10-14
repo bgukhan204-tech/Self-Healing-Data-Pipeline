@@ -393,18 +393,28 @@ def update_model_status(
 # READ & QUERY HELPERS
 # ==============================================================================
 
-def get_pipeline_runs(limit: int = 50, db_path: Optional[Path] = None) -> List[Dict[str, Any]]:
-    """Retrieve recent pipeline runs."""
+def get_pipeline_runs(
+    limit: int = 50,
+    db_path: Optional[Path] = None,
+    status: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Retrieve recent pipeline runs, optionally filtered by status."""
+    query = """
+        SELECT run_id, dataset_name, records_total, records_valid,
+               records_quarantined, records_anomalous, quality_score,
+               status, execution_time_ms, created_at
+        FROM pipeline_runs
+    """
+    params: List[Any] = []
+    if status and status.upper() != "ALL":
+        query += " WHERE status = ?"
+        params.append(status)
+    query += " ORDER BY created_at DESC LIMIT ?"
+    params.append(max(1, int(limit)))
+
     with get_connection(db_path) as conn:
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT run_id, dataset_name, records_total, records_valid,
-                   records_quarantined, records_anomalous, quality_score,
-                   status, execution_time_ms, created_at
-            FROM pipeline_runs
-            ORDER BY created_at DESC
-            LIMIT ?
-        """, (max(1, int(limit)),))
+        cursor.execute(query, params)
         return [dict(row) for row in cursor.fetchall()]
 
 
