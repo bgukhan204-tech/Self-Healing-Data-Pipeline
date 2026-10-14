@@ -253,11 +253,41 @@ class PipelineOrchestrator:
                 ):
                     # Supervised retraining must use incoming labeled data, not the old
                     # reference baseline. RecoveryEngine validates suitability before training.
-                    rec_res = self.recovery_engine.execute_drift_retraining(
-                        training_df=records_to_process,
-                        force=False,
-                        run_id=run_id,
-                    )
+                    try:
+                        rec_res = self.recovery_engine.execute_drift_retraining(
+                            training_df=records_to_process,
+                            force=False,
+                            run_id=run_id,
+                        )
+                    except Exception as e:
+                        # Recovery must not bypass final run persistence when an action
+                        # itself crashes. Record a failed execution and continue to the
+                        # normal status/audit path so the run cannot remain "Processing".
+                        error_message = str(e)
+                        summary = (
+                            "Automatic retraining raised an unexpected exception; "
+                            "the pipeline run was finalized with a warning."
+                        )
+                        log_system_event(
+                            event_type="RECOVERY_EXECUTION_ERROR",
+                            severity="ERROR",
+                            component="RECOVERY_ENGINE",
+                            description=summary,
+                            dataset_or_version=dataset_name,
+                            action_taken=d.recommended_action.value,
+                            outcome="FAILED",
+                            error_details=error_message,
+                            db_path=self.settings.database_path,
+                        )
+                        rec_res = RecoveryExecutionResult(
+                            action_id=f"recovery-error-{run_id}",
+                            trigger=d.trigger.value,
+                            action_type=d.recommended_action.value,
+                            status="FAILED",
+                            attempts=1,
+                            outcome_summary=summary,
+                            error_details=error_message,
+                        )
                     recovery_executions.append(rec_res)
 
         # 6. Overall Status Determination
