@@ -493,16 +493,21 @@ def get_latest_metrics_summary(db_path: Optional[Path] = None) -> Dict[str, Any]
         row["current_status"] = last_status_row["status"] if last_status_row else "Healthy"
 
         cursor.execute("""
-            SELECT 
+            SELECT
                 COUNT(*) as total_recoveries,
-                SUM(CASE WHEN status = 'SUCCESS' THEN 1 ELSE 0 END) as successful_recoveries
+                COALESCE(SUM(CASE WHEN status = 'SUCCESS' THEN 1 ELSE 0 END), 0) as successful_recoveries,
+                COALESCE(SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END), 0) as failed_recoveries
             FROM recovery_actions
         """)
         rec_row = cursor.fetchone()
         total_rec = rec_row["total_recoveries"] if rec_row else 0
         succ_rec = rec_row["successful_recoveries"] if rec_row else 0
-        row["recovery_success_rate"] = (succ_rec / total_rec * 100.0) if total_rec > 0 else 100.0
+        failed_rec = rec_row["failed_recoveries"] if rec_row else 0
+        # No recovery attempts is not a 100% success rate; None means not yet measurable.
+        row["recovery_success_rate"] = (succ_rec / total_rec * 100.0) if total_rec > 0 else None
         row["total_recoveries"] = total_rec
+        row["successful_recoveries"] = succ_rec
+        row["failed_recoveries"] = failed_rec
 
         # Get latest drift count
         cursor.execute("""
