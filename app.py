@@ -116,13 +116,23 @@ with st.expander("🚨 Inspect recent anomaly detections", expanded=False):
             "top_contributing_feature": "Top Contributing Feature",
             "created_at": "Recorded At",
         })
+        visible_anomaly_columns = [
+            "Recorded At", "Pipeline Run", "Record Index", "Anomaly Score",
+            "Detector", "Top Contributing Feature",
+        ]
+        visible_anomalies = anomaly_df[visible_anomaly_columns].fillna("")
         st.dataframe(
-            anomaly_df[[
-                "Recorded At", "Pipeline Run", "Record Index", "Anomaly Score",
-                "Detector", "Top Contributing Feature",
-            ]].fillna(""),
+            visible_anomalies,
             use_container_width=True,
             hide_index=True,
+        )
+        anomaly_csv = visible_anomalies.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "⬇️ Download filtered anomalies (CSV)",
+            data=anomaly_csv,
+            file_name="anomaly_investigation.csv",
+            mime="text/csv",
+            key="download_filtered_anomaly_events",
         )
     else:
         st.caption("No anomaly detections match the current filters.")
