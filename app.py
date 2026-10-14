@@ -101,11 +101,21 @@ with st.expander("🚨 Inspect recent anomaly detections", expanded=False):
         key="anomaly_metadata_search",
         placeholder="e.g. isolation_forest or customer_age",
     )
+    anomaly_min_score = st.slider(
+        "Minimum anomaly score",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.0,
+        step=0.05,
+        key="anomaly_min_score_filter",
+        help="Show only detections at or above this score.",
+    )
     anomaly_events = get_recent_anomaly_events(
         limit=20,
         db_path=settings.database_path,
         run_id=anomaly_run_filter,
         search=anomaly_search,
+        min_score=anomaly_min_score if anomaly_min_score > 0 else None,
     )
     if anomaly_events:
         anomaly_df = pd.DataFrame(anomaly_events).rename(columns={
