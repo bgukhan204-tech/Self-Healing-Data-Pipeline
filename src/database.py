@@ -397,18 +397,26 @@ def get_pipeline_runs(
     limit: int = 50,
     db_path: Optional[Path] = None,
     status: Optional[str] = None,
+    search: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Retrieve recent pipeline runs, optionally filtered by status."""
+    """Retrieve recent pipeline runs, optionally filtered by status and run/dataset text."""
     query = """
         SELECT run_id, dataset_name, records_total, records_valid,
                records_quarantined, records_anomalous, quality_score,
                status, execution_time_ms, created_at
         FROM pipeline_runs
     """
+    conditions: List[str] = []
     params: List[Any] = []
     if status and status.upper() != "ALL":
-        query += " WHERE status = ?"
+        conditions.append("status = ?")
         params.append(status)
+    if search and search.strip():
+        conditions.append("(run_id LIKE ? OR dataset_name LIKE ?)")
+        search_pattern = f"%{search.strip()}%"
+        params.extend([search_pattern, search_pattern])
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
     query += " ORDER BY created_at DESC LIMIT ?"
     params.append(max(1, int(limit)))
 
