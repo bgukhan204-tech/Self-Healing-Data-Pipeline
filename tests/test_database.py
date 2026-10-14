@@ -731,3 +731,30 @@ def test_anomaly_score_percentiles_summarize_numeric_visible_scores():
     assert score_values.quantile(0.95) == pytest.approx(0.9275)
     assert score_values.quantile(0.95) <= score_values.max()
     assert len(score_values) == 4
+
+
+def test_anomaly_score_bands_count_numeric_visible_scores_only():
+    """Score bands should be mutually exclusive and ignore invalid or missing scores."""
+    import pandas as pd
+
+    visible_anomalies = pd.DataFrame({
+        "Anomaly Score": [0.0, 0.39, 0.4, 0.69, 0.7, 1.0, "invalid", None]
+    })
+    score_values = pd.to_numeric(
+        visible_anomalies["Anomaly Score"], errors="coerce"
+    ).dropna()
+    band_counts = {
+        "Low (< 0.40)": int((score_values < 0.40).sum()),
+        "Moderate (0.40–0.69)": int(
+            ((score_values >= 0.40) & (score_values < 0.70)).sum()
+        ),
+        "High (≥ 0.70)": int((score_values >= 0.70).sum()),
+    }
+
+    assert band_counts == {
+        "Low (< 0.40)": 2,
+        "Moderate (0.40–0.69)": 2,
+        "High (≥ 0.70)": 2,
+    }
+    assert sum(band_counts.values()) == len(score_values)
+
