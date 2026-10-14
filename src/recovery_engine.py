@@ -15,6 +15,7 @@ from src.database import (
     log_system_event,
 )
 from src.model_registry import ModelRegistryManager
+from src.preprocessing import TARGET_COLUMN
 
 
 class RecoveryTrigger(str, Enum):
@@ -143,13 +144,20 @@ class RecoveryEngine:
 
         # 3. Data Drift Detected
         if drift_status in ["WARNING", "CRITICAL"]:
+            is_critical = drift_status == "CRITICAL"
             decisions.append(RecoveryDecision(
                 trigger=RecoveryTrigger.DATA_DRIFT_DETECTED,
                 recommended_action=RecoveryActionType.TRIGGER_RETRAINING,
-                can_auto_execute=(self.settings.auto_recovery_mode == "automatic"),
+                can_auto_execute=(
+                    is_critical and self.settings.auto_recovery_mode == "automatic"
+                ),
                 explanation=(
                     f"Statistical data drift detected (Severity: {drift_status}). "
-                    "Recommend triggering candidate retraining with fresh labeled data if validation criteria are met."
+                    + (
+                        "Critical drift can trigger guarded retraining when labeled data is available."
+                        if is_critical
+                        else "Warning drift is monitored only; automatic retraining is reserved for critical drift."
+                    )
                 ),
                 context={"drift_status": drift_status},
             ))
@@ -308,7 +316,52 @@ class RecoveryEngine:
         Execute automated retraining triggered by drift, respecting cooldown.
         """
         action_type = RecoveryActionType.TRIGGER_RETRAINING.value
-        
+
+        # Supervised retraining is unsafe without a usable target column and enough
+        # examples to create stratified train/validation splits.
+        if TARGET_COLUMN not in training_df.columns:
+            msg = (
+                f"Retraining skipped: incoming data has no '{TARGET_COLUMN}' labels. "
+                "Collect labeled outcomes before training a supervised candidate."
+            )
+            action_id = log_recovery_action(
+                trigger_event=RecoveryTrigger.DATA_DRIFT_DETECTED.value,
+                action_type=action_type,
+                status="SKIPPED",
+                outcome_summary=msg,
+                run_id=run_id,
+                db_path=self.settings.database_path,
+            )
+            return RecoveryExecutionResult(
+                action_id=action_id,
+                trigger=RecoveryTrigger.DATA_DRIFT_DETECTED.value,
+                action_type=action_type,
+                status="SKIPPED",
+                attempts=0,
+                outcome_summary=msg,
+            )
+        if len(training_df) < 40 or training_df[TARGET_COLUMN].nunique(dropna=True) < 2:
+            msg = (
+                "Retraining skipped: at least 40 labeled rows and two target classes "
+                "are required for a reliable stratified candidate evaluation."
+            )
+            action_id = log_recovery_action(
+                trigger_event=RecoveryTrigger.DATA_DRIFT_DETECTED.value,
+                action_type=action_type,
+                status="SKIPPED",
+                outcome_summary=msg,
+                run_id=run_id,
+                db_path=self.settings.database_path,
+            )
+            return RecoveryExecutionResult(
+                action_id=action_id,
+                trigger=RecoveryTrigger.DATA_DRIFT_DETECTED.value,
+                action_type=action_type,
+                status="SKIPPED",
+                attempts=0,
+                outcome_summary=msg,
+            )
+
         # Check cooldown
         if not force:
             cooling, remaining = self.check_cooldown(action_type)
