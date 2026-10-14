@@ -124,7 +124,17 @@ if drift_events_24h:
 
 # Provide an operator-friendly run history view with quality and processing outcomes.
 with st.expander("🧾 Inspect recent pipeline runs", expanded=False):
-    recent_runs = get_pipeline_runs(limit=20, db_path=settings.database_path)
+    run_status_filter = st.selectbox(
+        "Filter by run status",
+        options=["ALL", "Healthy", "Warning", "Recovering", "Error"],
+        index=0,
+        key="pipeline_run_status_filter",
+    )
+    recent_runs = get_pipeline_runs(
+        limit=20,
+        db_path=settings.database_path,
+        status=None if run_status_filter == "ALL" else run_status_filter,
+    )
     if recent_runs:
         runs_df = pd.DataFrame(recent_runs).rename(columns={
             "run_id": "Run ID",
