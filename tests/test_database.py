@@ -179,3 +179,38 @@ def test_recovery_metrics_include_failed_attempts(temp_db):
     assert summary["successful_recoveries"] == 1
     assert summary["failed_recoveries"] == 1
     assert summary["recovery_success_rate"] == 50.0
+
+
+
+def test_recovery_metrics_count_only_recent_failed_actions(temp_db):
+    """Expose recent failed recoveries while excluding older audit records."""
+    from datetime import datetime, timedelta, timezone
+
+    log_recovery_action(
+        trigger_event="DRIFT_CRITICAL",
+        action_type="RETRAIN_MODEL",
+        status="FAILED",
+        outcome_summary="Recent recovery failure.",
+        run_id="run_recent_failure",
+        db_path=temp_db,
+    )
+    old_action_id = log_recovery_action(
+        trigger_event="DRIFT_CRITICAL",
+        action_type="RETRAIN_MODEL",
+        status="FAILED",
+        outcome_summary="Older recovery failure.",
+        run_id="run_old_failure",
+        db_path=temp_db,
+    )
+    old_timestamp = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
+    with get_connection(temp_db) as conn:
+        conn.execute(
+            "UPDATE recovery_actions SET created_at = ? WHERE action_id = ?",
+            (old_timestamp, old_action_id),
+        )
+        conn.commit()
+
+    summary = get_latest_metrics_summary(temp_db)
+
+    assert summary["failed_recoveries"] == 2
+    assert summary["failed_recoveries_24h"] == 1
