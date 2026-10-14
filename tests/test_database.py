@@ -376,8 +376,8 @@ def test_pipeline_run_query_searches_run_id_or_dataset_and_combines_status(temp_
             db_path=temp_db,
         )
 
-    dataset_matches = get_pipeline_runs(limit=20, db_path=temp_db, search="customers.csv")
-    assert {run["run_id"] for run in dataset_matches} == {"run_customer_import"}
+    dataset_matches = get_pipeline_runs(limit=20, db_path=temp_db, search="orders.csv")
+    assert {run["run_id"] for run in dataset_matches} == {"run_orders_import"}
 
     run_id_matches = get_pipeline_runs(limit=20, db_path=temp_db, search="customer")
     assert {run["run_id"] for run in run_id_matches} == {
