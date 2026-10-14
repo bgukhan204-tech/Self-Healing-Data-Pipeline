@@ -140,3 +140,42 @@ def test_recovery_action_logging(temp_db):
     actions = get_recovery_actions(db_path=temp_db)
     assert len(actions) == 1
     assert actions[0]["status"] == "SUCCESS"
+
+
+
+def test_recovery_metrics_report_no_attempts_as_unavailable(temp_db):
+    """No recovery history must not be reported as a perfect success rate."""
+    summary = get_latest_metrics_summary(temp_db)
+
+    assert summary["total_recoveries"] == 0
+    assert summary["successful_recoveries"] == 0
+    assert summary["failed_recoveries"] == 0
+    assert summary["recovery_success_rate"] is None
+
+
+def test_recovery_metrics_include_failed_attempts(temp_db):
+    """Recovery aggregates should report successful and failed attempts accurately."""
+    log_recovery_action(
+        trigger_event="DRIFT_CRITICAL",
+        action_type="RETRAIN_MODEL",
+        status="SUCCESS",
+        outcome_summary="Recovery succeeded.",
+        run_id="run_metrics_1",
+        db_path=temp_db,
+    )
+    log_recovery_action(
+        trigger_event="DRIFT_CRITICAL",
+        action_type="RETRAIN_MODEL",
+        status="FAILED",
+        outcome_summary="Recovery failed.",
+        run_id="run_metrics_2",
+        error_details="test failure",
+        db_path=temp_db,
+    )
+
+    summary = get_latest_metrics_summary(temp_db)
+
+    assert summary["total_recoveries"] == 2
+    assert summary["successful_recoveries"] == 1
+    assert summary["failed_recoveries"] == 1
+    assert summary["recovery_success_rate"] == 50.0
