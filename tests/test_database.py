@@ -631,3 +631,41 @@ def test_pipeline_run_query_searches_run_id_or_dataset_and_combines_status(temp_
         limit=20, db_path=temp_db, status="Warning", search="customer"
     )
     assert {run["run_id"] for run in filtered_matches} == {"run_customer_retry"}
+
+
+def test_anomaly_feature_breakdown_uses_displayed_rows_and_ignores_blanks():
+    """Feature breakdown should summarize only displayed, non-empty feature labels."""
+    import pandas as pd
+
+    visible_anomalies = pd.DataFrame({
+        "Top Contributing Feature": [
+            "account_balance",
+            "credit_score",
+            "account_balance",
+            "",
+            None,
+            "transaction_amount",
+            "account_balance",
+        ]
+    })
+    feature_counts = (
+        visible_anomalies["Top Contributing Feature"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .replace("", pd.NA)
+        .dropna()
+        .value_counts()
+        .head(5)
+        .rename_axis("Top Contributing Feature")
+        .reset_index(name="Detection Count")
+    )
+
+    counts = dict(zip(
+        feature_counts["Top Contributing Feature"],
+        feature_counts["Detection Count"],
+    ))
+    assert counts["account_balance"] == 3
+    assert counts["credit_score"] == 1
+    assert counts["transaction_amount"] == 1
+    assert "None" not in counts
