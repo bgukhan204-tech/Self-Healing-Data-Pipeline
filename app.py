@@ -144,6 +144,24 @@ with st.expander("🚨 Inspect recent anomaly detections", expanded=False):
             score_col1.metric("Displayed detections", len(score_values))
             score_col2.metric("Average anomaly score", f"{score_values.mean():.3f}")
             score_col3.metric("Highest anomaly score", f"{score_values.max():.3f}")
+        feature_counts = (
+            visible_anomalies["Top Contributing Feature"]
+            .astype(str)
+            .str.strip()
+            .replace("", pd.NA)
+            .dropna()
+            .value_counts()
+            .head(5)
+            .rename_axis("Top Contributing Feature")
+            .reset_index(name="Detection Count")
+        )
+        if not feature_counts.empty:
+            st.caption("Most frequent contributing features in the displayed results")
+            st.dataframe(
+                feature_counts,
+                use_container_width=True,
+                hide_index=True,
+            )
         st.dataframe(
             visible_anomalies,
             use_container_width=True,
