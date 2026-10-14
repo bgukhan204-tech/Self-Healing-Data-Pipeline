@@ -299,6 +299,55 @@ def test_recent_anomaly_query_returns_safe_investigation_fields_and_respects_lim
 
 
 
+
+
+def test_anomaly_investigation_csv_contains_only_safe_metadata(temp_db):
+    """CSV export data should contain investigation fields, never raw row payloads."""
+    import csv
+    from io import StringIO
+
+    log_pipeline_run(
+        run_id="run_anomaly_export",
+        dataset_name="export.csv",
+        records_total=3,
+        records_valid=3,
+        records_quarantined=0,
+        records_anomalous=1,
+        quality_score=90.0,
+        status="Warning",
+        execution_time_ms=10.0,
+        db_path=temp_db,
+    )
+    log_anomaly_events(
+        run_id="run_anomaly_export",
+        anomalies=[{
+            "record_index": 2,
+            "anomaly_score": 0.95,
+            "detector_method": "isolation_forest",
+            "top_contributing_feature": "account_balance",
+            "record_payload": {"private_marker": "must_not_export"},
+        }],
+        db_path=temp_db,
+    )
+
+    events = get_recent_anomaly_events(limit=20, db_path=temp_db)
+    export_fields = [
+        "run_id", "record_index", "anomaly_score", "detector_method",
+        "top_contributing_feature", "created_at",
+    ]
+    output = StringIO()
+    writer = csv.DictWriter(output, fieldnames=export_fields)
+    writer.writeheader()
+    writer.writerows({field: event[field] for field in export_fields} for event in events)
+    exported_csv = output.getvalue()
+
+    assert "run_anomaly_export" in exported_csv
+    assert "account_balance" in exported_csv
+    assert "private_marker" not in exported_csv
+    assert "must_not_export" not in exported_csv
+    assert "record_payload" not in exported_csv
+
+
 def test_recent_anomaly_query_filters_by_run_and_safe_metadata(temp_db):
     """Anomaly investigation filters should combine safely and match metadata."""
     for run_id, dataset_name in [
