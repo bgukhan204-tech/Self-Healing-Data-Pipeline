@@ -75,3 +75,16 @@ def test_retraining_skips_too_small_or_single_class_data(engine, monkeypatch):
 
     assert result.status == "SKIPPED"
     assert "at least 40 complete labeled rows" in result.outcome_summary
+
+
+def test_critical_drift_safety_eligibility_is_independent_of_runtime_mode(engine, monkeypatch):
+    """Runtime mode controls execution; safety eligibility reflects drift severity."""
+    monkeypatch.setattr(engine.settings, "auto_recovery_mode", "manual")
+
+    decisions = engine.evaluate_pipeline_situation(drift_status="CRITICAL")
+    retraining = next(
+        d for d in decisions
+        if d.recommended_action == RecoveryActionType.TRIGGER_RETRAINING
+    )
+
+    assert retraining.can_auto_execute is True

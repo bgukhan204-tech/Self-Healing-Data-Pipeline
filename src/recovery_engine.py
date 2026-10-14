@@ -148,9 +148,9 @@ class RecoveryEngine:
             decisions.append(RecoveryDecision(
                 trigger=RecoveryTrigger.DATA_DRIFT_DETECTED,
                 recommended_action=RecoveryActionType.TRIGGER_RETRAINING,
-                can_auto_execute=(
-                    is_critical and self.settings.auto_recovery_mode == "automatic"
-                ),
+                # Safety eligibility is independent of the runtime mode; the orchestrator
+                # separately decides whether this run may execute automatic actions.
+                can_auto_execute=is_critical,
                 explanation=(
                     f"Statistical data drift detected (Severity: {drift_status}). "
                     + (
