@@ -140,10 +140,12 @@ with st.expander("🚨 Inspect recent anomaly detections", expanded=False):
         visible_anomalies = anomaly_df[visible_anomaly_columns].fillna("")
         score_values = pd.to_numeric(visible_anomalies["Anomaly Score"], errors="coerce").dropna()
         if not score_values.empty:
-            score_col1, score_col2, score_col3 = st.columns(3)
+            score_col1, score_col2, score_col3, score_col4, score_col5 = st.columns(5)
             score_col1.metric("Displayed detections", len(score_values))
             score_col2.metric("Average anomaly score", f"{score_values.mean():.3f}")
-            score_col3.metric("Highest anomaly score", f"{score_values.max():.3f}")
+            score_col3.metric("Median anomaly score", f"{score_values.median():.3f}")
+            score_col4.metric("95th percentile", f"{score_values.quantile(0.95):.3f}")
+            score_col5.metric("Highest anomaly score", f"{score_values.max():.3f}")
             score_distribution = px.histogram(
                 pd.DataFrame({"Anomaly Score": score_values}),
                 x="Anomaly Score",

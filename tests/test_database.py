@@ -713,3 +713,21 @@ def test_anomaly_score_timeline_sorts_timestamps_and_drops_invalid_dates():
 
     assert score_timeline["Anomaly Score"].tolist() == [0.4, 0.8]
     assert score_timeline["Recorded At"].is_monotonic_increasing
+
+
+
+def test_anomaly_score_percentiles_summarize_numeric_visible_scores():
+    """Percentile metrics should use numeric scores from the displayed detections."""
+    import pandas as pd
+
+    visible_anomalies = pd.DataFrame({
+        "Anomaly Score": [0.1, 0.2, "invalid", None, 0.95, 0.8]
+    })
+    score_values = pd.to_numeric(
+        visible_anomalies["Anomaly Score"], errors="coerce"
+    ).dropna()
+
+    assert score_values.median() == pytest.approx(0.5)
+    assert score_values.quantile(0.95) == pytest.approx(0.9275)
+    assert score_values.quantile(0.95) <= score_values.max()
+    assert len(score_values) == 4
