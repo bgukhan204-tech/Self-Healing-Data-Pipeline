@@ -18,6 +18,7 @@ from src.database import (
     get_latest_metrics_summary,
     get_model_history,
     get_pipeline_runs,
+    get_recent_drift_events,
     get_recent_failed_recoveries,
     get_recovery_actions,
     get_system_events,
@@ -86,6 +87,40 @@ if summary_stats.get("failed_recoveries", 0):
             )
         else:
             st.caption("No failed recovery actions are currently recorded.")
+
+# Surface recent feature-level drift detections for faster investigation.
+drift_events_24h = summary_stats.get("drift_events_24h", 0)
+if drift_events_24h:
+    st.warning(
+        f"Data drift detected: {drift_events_24h} feature-level drift event(s) "
+        "recorded in the last 24 hours. Review the affected features and test results."
+    )
+
+if drift_events_24h:
+    with st.expander("📉 Inspect recent detected drift", expanded=False):
+        drift_events = get_recent_drift_events(
+            limit=20, db_path=settings.database_path
+        )
+        if drift_events:
+            drift_df = pd.DataFrame(drift_events).rename(columns={
+                "run_id": "Pipeline Run",
+                "feature_name": "Feature",
+                "test_method": "Statistical Test",
+                "statistic": "Test Statistic",
+                "p_value": "P-value",
+                "severity": "Severity",
+                "created_at": "Recorded At",
+            })
+            st.dataframe(
+                drift_df[[
+                    "Recorded At", "Pipeline Run", "Feature", "Severity",
+                    "Statistical Test", "Test Statistic", "P-value",
+                ]].fillna(""),
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.caption("No detected drift events are currently recorded.")
 
 # Hero Description Banner
 st.markdown(
