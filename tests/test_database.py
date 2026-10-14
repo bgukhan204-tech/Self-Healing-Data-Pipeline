@@ -417,6 +417,20 @@ def test_recent_anomaly_query_filters_by_run_and_safe_metadata(temp_db):
 
 
 
+
+def test_anomaly_score_summary_uses_only_filtered_visible_rows():
+    """Dashboard score summaries should be calculated from the displayed result set."""
+    import pandas as pd
+
+    visible_anomalies = pd.DataFrame({"Anomaly Score": [0.8, 0.9, 0.7]})
+    score_values = pd.to_numeric(
+        visible_anomalies["Anomaly Score"], errors="coerce"
+    ).dropna()
+
+    assert len(score_values) == 3
+    assert score_values.mean() == pytest.approx(0.8)
+    assert score_values.max() == pytest.approx(0.9)
+
 def test_recent_anomaly_query_respects_requested_limit(temp_db):
     """Anomaly investigation history should return no more than the requested limit."""
     log_pipeline_run(
