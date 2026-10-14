@@ -353,3 +353,39 @@ def test_pipeline_run_query_filters_by_status(temp_db):
 
     all_runs = get_pipeline_runs(limit=20, db_path=temp_db, status="ALL")
     assert len(all_runs) == 3
+
+
+
+def test_pipeline_run_query_searches_run_id_or_dataset_and_combines_status(temp_db):
+    """Run history search should match run IDs or dataset names and combine with status."""
+    for run_id, dataset_name, status in [
+        ("run_customer_import", "customers.csv", "Healthy"),
+        ("run_orders_import", "orders.csv", "Warning"),
+        ("run_customer_retry", "retry_customers.csv", "Warning"),
+    ]:
+        log_pipeline_run(
+            run_id=run_id,
+            dataset_name=dataset_name,
+            records_total=5,
+            records_valid=5,
+            records_quarantined=0,
+            records_anomalous=0,
+            quality_score=100.0,
+            status=status,
+            execution_time_ms=25.0,
+            db_path=temp_db,
+        )
+
+    dataset_matches = get_pipeline_runs(limit=20, db_path=temp_db, search="customers.csv")
+    assert {run["run_id"] for run in dataset_matches} == {"run_customer_import"}
+
+    run_id_matches = get_pipeline_runs(limit=20, db_path=temp_db, search="customer")
+    assert {run["run_id"] for run in run_id_matches} == {
+        "run_customer_import",
+        "run_customer_retry",
+    }
+
+    filtered_matches = get_pipeline_runs(
+        limit=20, db_path=temp_db, status="Warning", search="customer"
+    )
+    assert {run["run_id"] for run in filtered_matches} == {"run_customer_retry"}
