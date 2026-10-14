@@ -445,6 +445,24 @@ def get_recovery_actions(limit: int = 50, db_path: Optional[Path] = None) -> Lis
         return [dict(row) for row in cursor.fetchall()]
 
 
+def get_recent_failed_recoveries(
+    limit: int = 20,
+    db_path: Optional[Path] = None,
+) -> List[Dict[str, Any]]:
+    """Retrieve recent failed recovery actions with actionable audit details."""
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT action_id, run_id, trigger_event, action_type, status,
+                   attempts, outcome_summary, error_details, created_at
+            FROM recovery_actions
+            WHERE status = 'FAILED'
+            ORDER BY datetime(created_at) DESC, action_id DESC
+            LIMIT ?
+        """, (max(1, int(limit)),))
+        return [dict(row) for row in cursor.fetchall()]
+
+
 def get_model_history(db_path: Optional[Path] = None) -> List[Dict[str, Any]]:
     """Retrieve registered models ordered by training timestamp."""
     with get_connection(db_path) as conn:
