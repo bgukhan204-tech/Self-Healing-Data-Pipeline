@@ -160,6 +160,37 @@ with st.expander("🚨 Inspect recent anomaly detections", expanded=False):
                 use_container_width=True,
                 key="anomaly_score_distribution",
             )
+            score_timeline = pd.DataFrame({
+                "Recorded At": pd.to_datetime(
+                    visible_anomalies.loc[score_values.index, "Recorded At"],
+                    errors="coerce",
+                    utc=True,
+                ),
+                "Anomaly Score": score_values,
+            }).dropna(subset=["Recorded At"]).sort_values("Recorded At")
+            if not score_timeline.empty:
+                score_timeline_chart = px.scatter(
+                    score_timeline,
+                    x="Recorded At",
+                    y="Anomaly Score",
+                    title="Anomaly Scores Over Time",
+                    hover_data={"Recorded At": True, "Anomaly Score": ":.3f"},
+                )
+                score_timeline_chart.update_traces(
+                    mode="lines+markers",
+                    marker={"size": 8},
+                )
+                score_timeline_chart.update_layout(
+                    xaxis_title="Detection Time (UTC)",
+                    yaxis_title="Anomaly Score",
+                    yaxis_range=[0, 1],
+                    showlegend=False,
+                )
+                st.plotly_chart(
+                    score_timeline_chart,
+                    use_container_width=True,
+                    key="anomaly_score_timeline",
+                )
         feature_counts = (
             visible_anomalies["Top Contributing Feature"]
             .fillna("")
