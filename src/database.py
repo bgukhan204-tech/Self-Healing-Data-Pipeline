@@ -481,6 +481,23 @@ def get_recent_drift_events(
         return [dict(row) for row in cursor.fetchall()]
 
 
+def get_recent_anomaly_events(
+    limit: int = 20,
+    db_path: Optional[Path] = None,
+) -> List[Dict[str, Any]]:
+    """Retrieve recent anomaly detections without exposing full record payloads."""
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, run_id, record_index, anomaly_score, detector_method,
+                   top_contributing_feature, created_at
+            FROM anomaly_events
+            ORDER BY datetime(created_at) DESC, id DESC
+            LIMIT ?
+        """, (max(1, int(limit)),))
+        return [dict(row) for row in cursor.fetchall()]
+
+
 def get_recent_failed_recoveries(
     limit: int = 20,
     db_path: Optional[Path] = None,

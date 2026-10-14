@@ -18,6 +18,7 @@ from src.database import (
     get_latest_metrics_summary,
     get_model_history,
     get_pipeline_runs,
+    get_recent_anomaly_events,
     get_recent_drift_events,
     get_recent_failed_recoveries,
     get_recovery_actions,
@@ -87,6 +88,31 @@ if summary_stats.get("failed_recoveries", 0):
             )
         else:
             st.caption("No failed recovery actions are currently recorded.")
+
+# Surface recent anomaly detections for operator investigation.
+with st.expander("🚨 Inspect recent anomaly detections", expanded=False):
+    anomaly_events = get_recent_anomaly_events(
+        limit=20, db_path=settings.database_path
+    )
+    if anomaly_events:
+        anomaly_df = pd.DataFrame(anomaly_events).rename(columns={
+            "run_id": "Pipeline Run",
+            "record_index": "Record Index",
+            "anomaly_score": "Anomaly Score",
+            "detector_method": "Detector",
+            "top_contributing_feature": "Top Contributing Feature",
+            "created_at": "Recorded At",
+        })
+        st.dataframe(
+            anomaly_df[[
+                "Recorded At", "Pipeline Run", "Record Index", "Anomaly Score",
+                "Detector", "Top Contributing Feature",
+            ]].fillna(""),
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.caption("No anomaly detections are currently recorded.")
 
 # Surface recent feature-level drift detections for faster investigation.
 drift_events_24h = summary_stats.get("drift_events_24h", 0)
