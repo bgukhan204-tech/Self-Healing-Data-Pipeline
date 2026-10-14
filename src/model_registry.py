@@ -125,30 +125,45 @@ class ModelRegistryManager:
                 rejection_reason = f"Candidate F1 ({report.f1_score:.4f}) below minimum requirement ({min_f1:.4f})."
                 msg = f"Candidate model {version} rejected: {rejection_reason}"
         else:
-            # Active model exists: compare performance on validation set
-            active_f1 = float(active_model_info.get("f1_score", 0.0))
-            
-            # Acceptance criteria: F1 >= min_f1 AND F1 >= active_f1 - tolerance
-            if report.f1_score < min_f1:
-                is_promoted = False
-                status = "rejected"
-                rejection_reason = f"F1-score ({report.f1_score:.4f}) below absolute minimum threshold ({min_f1:.4f})."
-                msg = f"Candidate {version} rejected: {rejection_reason}"
-            elif report.f1_score < (active_f1 - tolerance):
+            # Compare candidate and active model on the SAME validation rows.
+            # Stored historical F1 scores may come from different splits and are
+            # therefore not a fair promotion baseline.
+            try:
+                active_artifact = self.load_model_artifact(active_model_info["artifact_path"])
+                active_report = evaluate_existing_model(active_artifact, val_df)
+                active_f1 = float(active_report.f1_score)
+            except Exception as exc:
                 is_promoted = False
                 status = "rejected"
                 rejection_reason = (
-                    f"Candidate F1 ({report.f1_score:.4f}) degraded by more than allowed tolerance "
-                    f"({tolerance * 100:.1f}%) compared to active model {active_model_info['model_version']} (F1: {active_f1:.4f})."
+                    "Could not evaluate the active model on the candidate validation set; "
+                    f"promotion blocked to preserve the active model. Details: {exc}"
                 )
                 msg = f"Candidate {version} rejected: {rejection_reason}"
             else:
-                is_promoted = True
-                status = "active"
-                msg = (
-                    f"Candidate model {version} passed validation gates and was promoted to ACTIVE! "
-                    f"(Candidate F1: {report.f1_score:.4f} vs Active F1: {active_f1:.4f})"
-                )
+                # Acceptance criteria: candidate meets minimum F1 and stays within
+                # the allowed degradation tolerance on a like-for-like evaluation.
+                if report.f1_score < min_f1:
+                    is_promoted = False
+                    status = "rejected"
+                    rejection_reason = f"F1-score ({report.f1_score:.4f}) below absolute minimum threshold ({min_f1:.4f})."
+                    msg = f"Candidate {version} rejected: {rejection_reason}"
+                elif report.f1_score < (active_f1 - tolerance):
+                    is_promoted = False
+                    status = "rejected"
+                    rejection_reason = (
+                        f"Candidate F1 ({report.f1_score:.4f}) degraded by more than allowed tolerance "
+                        f"({tolerance * 100:.1f}%) compared to active model {active_model_info['model_version']} "
+                        f"on the same validation data (F1: {active_f1:.4f})."
+                    )
+                    msg = f"Candidate {version} rejected: {rejection_reason}"
+                else:
+                    is_promoted = True
+                    status = "active"
+                    msg = (
+                        f"Candidate model {version} passed validation gates and was promoted to ACTIVE! "
+                        f"(Candidate F1: {report.f1_score:.4f} vs Active F1 on same validation data: {active_f1:.4f})"
+                    )
 
         # 3. Register in SQLite
         register_model_run(
