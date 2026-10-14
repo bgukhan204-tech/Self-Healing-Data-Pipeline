@@ -650,6 +650,7 @@ def test_anomaly_feature_breakdown_uses_displayed_rows_and_ignores_blanks():
     })
     feature_counts = (
         visible_anomalies["Top Contributing Feature"]
+        .fillna("")
         .astype(str)
         .str.strip()
         .replace("", pd.NA)
