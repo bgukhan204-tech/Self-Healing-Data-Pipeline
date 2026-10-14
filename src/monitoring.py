@@ -230,6 +230,7 @@ class PipelineOrchestrator:
                     component="DRIFT_MONITOR",
                     description=f"Drift monitoring failed: {str(e)}",
                     error_details=str(e),
+                    db_path=self.settings.database_path,
                 )
 
         # 4. Decision Engine Evaluation
