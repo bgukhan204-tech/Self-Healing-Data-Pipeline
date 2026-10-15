@@ -53,7 +53,7 @@ flowchart TD
 | **Statistical Testing** | SciPy | Kolmogorov-Smirnov test, Wasserstein distance, Chi-Square |
 | **Data Visualization** | Plotly | Dynamic distributions, confusion matrices, anomaly projections |
 | **Persistence** | SQLite & Joblib | Parameterized audit events, runs, and model bundles |
-| **Testing** | Pytest | Comprehensive 22-test automated unit and integration suite |
+| **Testing** | Pytest | Comprehensive 48-test automated unit and integration suite |
 | **Configuration** | Python-dotenv | Environment variable configuration with `.env` |
 
 ---
@@ -216,7 +216,7 @@ Open your browser at `http://localhost:8501`.
 ```powershell
 pytest -v
 ```
-All 22 unit, integration, and end-to-end tests will execute and pass in under 5 seconds.
+All 48 unit, integration, and end-to-end tests will execute and pass cleanly.
 
 ---
 
@@ -283,7 +283,7 @@ All 22 unit, integration, and end-to-end tests will execute and pass in under 5 
 - **Architected and implemented a Self-Healing MLOps Data Pipeline** in Python, Streamlit, and Scikit-Learn that continuously monitors data quality, detects multivariate anomalies via Isolation Forests, and isolates corrupted records into an auditable quarantine storage without data loss.
 - **Engineered automated statistical drift detection** utilizing two-sample Kolmogorov-Smirnov (KS) tests, Wasserstein distance, and Chi-Square frequency tests to monitor continuous and categorical distribution shifts.
 - **Implemented an autonomous recovery decision engine** supporting bounded retries with exponential backoff, automated candidate retraining, and zero-downtime model rollback with strict promotion validation gates (F1 degradation &le; 2%).
-- **Developed an enterprise telemetry dashboard and SQLite audit log** with Write-Ahead Logging (WAL), interactive Plotly visualizations, chaos failure simulation lab, and 100% pass rate across a 22-test Pytest suite.
+- **Developed an enterprise telemetry dashboard and SQLite audit log** with Write-Ahead Logging (WAL), interactive Plotly visualizations, chaos failure simulation lab, and 100% pass rate across a 48-test Pytest suite.
 
 ---
 

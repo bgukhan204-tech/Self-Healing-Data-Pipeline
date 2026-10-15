@@ -56,3 +56,6 @@ htmlcov/
 
 # Streamlit local secrets
 .streamlit/secrets.toml
+
+# Nested git clones
+Self-Healing-Data-Pipeline.git/

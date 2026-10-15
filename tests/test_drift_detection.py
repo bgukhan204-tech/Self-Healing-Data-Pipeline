@@ -34,3 +34,40 @@ def test_drift_on_shifted_data(monitor):
     # Check specific shifted numeric columns
     shifted_names = [r.feature_name for r in report.feature_reports if r.drift_detected]
     assert any(col in shifted_names for col in ["age", "annual_income", "credit_score", "debt_to_income"])
+
+
+def test_categorical_frequency_drift(monitor):
+    """Verify that severe categorical shift triggers categorical drift detection."""
+    df = generate_synthetic_dataset(n_samples=250, random_seed=42)
+    # Force single categorical category
+    df["home_ownership"] = "RENT"
+    report = monitor.evaluate_drift(df)
+    
+    cat_rep = next((r for r in report.feature_reports if r.feature_name == "home_ownership"), None)
+    assert cat_rep is not None
+    assert cat_rep.drift_detected is True
+    assert cat_rep.test_method == "chi_square"
+    assert cat_rep.distance_metric > 0.10
+
+
+def test_practical_significance_distinction(monitor):
+    """Verify that practical importance is distinguished in the summary table."""
+    drifted_batch = generate_synthetic_dataset(n_samples=400, random_seed=999, drift_factor=0.9)
+    report = monitor.evaluate_drift(drifted_batch)
+    
+    assert "Practical Importance" in report.summary_df.columns
+    # Check that high drift has practical significance marked
+    assert any(report.summary_df["Practical Importance"].isin(["HIGH", "MODERATE"]))
+
+
+def test_drift_empty_and_missing_features(monitor):
+    """Verify safe evaluation when incoming dataframe is empty or missing columns."""
+    import pandas as pd
+    empty_rep = monitor.evaluate_drift(pd.DataFrame())
+    assert empty_rep.overall_drift_status == "HEALTHY"
+    assert empty_rep.drifted_features_count == 0
+
+    partial_df = pd.DataFrame({"age": [25, 30, 35, 40, 45, 50]})
+    partial_rep = monitor.evaluate_drift(partial_df)
+    assert partial_rep.total_features_evaluated == 1
+

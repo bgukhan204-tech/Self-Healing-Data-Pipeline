@@ -49,3 +49,39 @@ def test_statistical_baseline_comparison(fitted_detector):
     assert res.is_anomaly[0] == True
     assert res.statistical_baseline_flags[0] == True
     assert "annual_income" in res.top_contributing_features[0]
+
+
+def test_small_dataset_anomaly_detection(fitted_detector):
+    """Verify anomaly detector handles single-row and tiny datasets without crashing."""
+    single_df = generate_synthetic_dataset(n_samples=1, random_seed=77)
+    res = fitted_detector.predict(single_df)
+    
+    assert res.total_records == 1
+    assert len(res.is_anomaly) == 1
+    assert len(res.anomaly_scores) == 1
+    assert 0.0 <= res.anomaly_scores[0] <= 1.0
+
+
+def test_missing_features_and_invalid_input(fitted_detector):
+    """Verify detector handles missing columns and string inputs in numeric columns gracefully."""
+    df = pd.DataFrame({
+        "age": ["not_a_number", "45", None],
+        "credit_score": [650, None, 720],
+        # annual_income, debt_to_income, etc. omitted intentionally
+    })
+    res = fitted_detector.predict(df)
+    
+    assert res.total_records == 3
+    assert len(res.is_anomaly) == 3
+    assert len(res.anomaly_scores) == 3
+
+
+def test_repeated_runs_reproducibility(fitted_detector):
+    """Verify that anomaly scoring is deterministic and reproducible across repeated runs."""
+    test_df = generate_synthetic_dataset(n_samples=50, random_seed=42)
+    res1 = fitted_detector.predict(test_df)
+    res2 = fitted_detector.predict(test_df)
+    
+    np.testing.assert_array_equal(res1.is_anomaly, res2.is_anomaly)
+    np.testing.assert_allclose(res1.anomaly_scores, res2.anomaly_scores, atol=1e-5)
+

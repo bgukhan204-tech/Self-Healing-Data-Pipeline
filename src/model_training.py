@@ -102,15 +102,22 @@ def train_model(
             n_jobs=-1,
         )
 
-    # 4. Fit model
-    model.fit(X_train, y_train)
+    # 4. Fit model (handle class imbalance for GradientBoosting with sample weights)
+    if algorithm == "GradientBoosting" and not degrade_intentionally:
+        from sklearn.utils.class_weight import compute_sample_weight
+        sample_weights = compute_sample_weight(class_weight="balanced", y=y_train)
+        model.fit(X_train, y_train, sample_weight=sample_weights)
+    else:
+        model.fit(X_train, y_train)
 
     # 5. Evaluate on validation split
     y_pred = model.predict(X_val)
     
+    auc = 0.5
     try:
-        y_prob = model.predict_proba(X_val)[:, 1]
-        auc = float(roc_auc_score(y_val, y_prob))
+        if len(np.unique(y_val)) > 1:
+            y_prob = model.predict_proba(X_val)[:, 1]
+            auc = float(roc_auc_score(y_val, y_prob))
     except Exception:
         auc = 0.5
 
@@ -118,7 +125,7 @@ def train_model(
     prec = float(precision_score(y_val, y_pred, average="weighted", zero_division=0))
     rec = float(recall_score(y_val, y_pred, average="weighted", zero_division=0))
     f1 = float(f1_score(y_val, y_pred, average="weighted", zero_division=0))
-    cm = confusion_matrix(y_val, y_pred).tolist()
+    cm = confusion_matrix(y_val, y_pred, labels=[0, 1]).tolist()
 
     report = ModelEvaluationReport(
         accuracy=round(acc, 4),
@@ -146,9 +153,11 @@ def evaluate_existing_model(
         raise ValueError(f"Evaluation dataframe must contain '{TARGET_COLUMN}' target.")
 
     y_pred = model.predict(X_val)
+    auc = 0.5
     try:
-        y_prob = model.predict_proba(X_val)[:, 1]
-        auc = float(roc_auc_score(y_val, y_prob))
+        if len(np.unique(y_val)) > 1:
+            y_prob = model.predict_proba(X_val)[:, 1]
+            auc = float(roc_auc_score(y_val, y_prob))
     except Exception:
         auc = 0.5
 
@@ -156,7 +165,7 @@ def evaluate_existing_model(
     prec = float(precision_score(y_val, y_pred, average="weighted", zero_division=0))
     rec = float(recall_score(y_val, y_pred, average="weighted", zero_division=0))
     f1 = float(f1_score(y_val, y_pred, average="weighted", zero_division=0))
-    cm = confusion_matrix(y_val, y_pred).tolist()
+    cm = confusion_matrix(y_val, y_pred, labels=[0, 1]).tolist()
 
     return ModelEvaluationReport(
         accuracy=round(acc, 4),

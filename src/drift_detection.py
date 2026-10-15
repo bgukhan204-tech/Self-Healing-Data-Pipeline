@@ -27,6 +27,7 @@ class FeatureDriftReport:
     drift_detected: bool
     severity: str  # 'none', 'warning', 'critical'
     description: str
+    practical_significance: str = "NONE"  # 'NEGLIGIBLE', 'LOW', 'MODERATE', 'HIGH'
 
 
 @dataclass
@@ -87,8 +88,8 @@ class DriftMonitor:
             if col not in self.reference_data.columns or col not in incoming_df.columns:
                 continue
 
-            ref_series = self.reference_data[col].dropna()
-            inc_series = incoming_df[col].dropna()
+            ref_series = pd.to_numeric(self.reference_data[col], errors="coerce").dropna()
+            inc_series = pd.to_numeric(incoming_df[col], errors="coerce").dropna()
 
             if len(ref_series) < 5 or len(inc_series) < 5:
                 continue
@@ -102,15 +103,25 @@ class DriftMonitor:
             ref_std = float(ref_series.std()) if ref_series.std() > 1e-6 else 1.0
             w_dist = float(wasserstein_distance(ref_series, inc_series) / ref_std)
 
-            # Determine severity
+            # Practical significance categorization
+            if w_dist >= self.wasserstein_threshold * 1.5:
+                practical_sig = "HIGH"
+            elif w_dist >= self.wasserstein_threshold:
+                practical_sig = "MODERATE"
+            elif w_dist >= 0.05:
+                practical_sig = "LOW"
+            else:
+                practical_sig = "NEGLIGIBLE"
+
+            # Determine severity combining statistical and practical significance
             if p_val < self.critical_p_val or w_dist > (self.wasserstein_threshold * 1.5):
                 drift_detected = True
                 severity = "critical"
-                desc = f"Critical distribution shift (p-val={p_val:.2e}, Wasserstein={w_dist:.2f})"
+                desc = f"Critical distribution shift (p-val={p_val:.2e}, Wasserstein={w_dist:.2f}, Practical={practical_sig})"
             elif p_val < self.p_val_threshold or w_dist > self.wasserstein_threshold:
                 drift_detected = True
                 severity = "warning"
-                desc = f"Moderate distribution shift (p-val={p_val:.3f}, Wasserstein={w_dist:.2f})"
+                desc = f"Moderate distribution shift (p-val={p_val:.3f}, Wasserstein={w_dist:.2f}, Practical={practical_sig})"
             else:
                 drift_detected = False
                 severity = "none"
@@ -126,6 +137,7 @@ class DriftMonitor:
                 drift_detected=drift_detected,
                 severity=severity,
                 description=desc,
+                practical_significance=practical_sig,
             ))
 
         # 2. Categorical Feature Drift (Chi-Square Goodness-of-Fit / Frequency Comparison)
@@ -133,8 +145,14 @@ class DriftMonitor:
             if col not in self.reference_data.columns or col not in incoming_df.columns:
                 continue
 
-            ref_counts = self.reference_data[col].value_counts(normalize=True)
-            inc_counts = incoming_df[col].value_counts(normalize=True)
+            ref_series = self.reference_data[col].astype(str).dropna()
+            inc_series = incoming_df[col].astype(str).dropna()
+
+            if len(ref_series) < 5 or len(inc_series) < 5:
+                continue
+
+            ref_counts = ref_series.value_counts(normalize=True)
+            inc_counts = inc_series.value_counts(normalize=True)
 
             # Align categories
             all_cats = list(set(ref_counts.index).union(set(inc_counts.index)))
@@ -148,9 +166,18 @@ class DriftMonitor:
             # Total Variation Distance (TVD) as distance metric [0, 1]
             tvd = float(0.5 * np.sum(np.abs(ref_freq - inc_freq)))
 
+            if tvd >= 0.20:
+                practical_sig = "HIGH"
+            elif tvd >= 0.10:
+                practical_sig = "MODERATE"
+            elif tvd >= 0.04:
+                practical_sig = "LOW"
+            else:
+                practical_sig = "NEGLIGIBLE"
+
             # Chi-square test between observed incoming counts and expected from reference
-            inc_raw_counts = np.array([incoming_df[col].value_counts().get(c, 0) for c in all_cats])
-            expected_counts = ref_freq * len(incoming_df)
+            inc_raw_counts = np.array([inc_series.value_counts().get(c, 0) for c in all_cats])
+            expected_counts = ref_freq * len(inc_series)
             
             # Avoid divide-by-zero
             valid_mask = expected_counts > 0
@@ -169,11 +196,11 @@ class DriftMonitor:
             if chi_pval < self.critical_p_val or tvd > 0.20:
                 drift_detected = True
                 severity = "critical"
-                desc = f"Critical categorical frequency shift (TVD={tvd:.2f}, p-val={chi_pval:.2e})"
+                desc = f"Critical categorical frequency shift (TVD={tvd:.2f}, p-val={chi_pval:.2e}, Practical={practical_sig})"
             elif chi_pval < self.p_val_threshold or tvd > 0.10:
                 drift_detected = True
                 severity = "warning"
-                desc = f"Moderate categorical frequency shift (TVD={tvd:.2f}, p-val={chi_pval:.3f})"
+                desc = f"Moderate categorical frequency shift (TVD={tvd:.2f}, p-val={chi_pval:.3f}, Practical={practical_sig})"
             else:
                 drift_detected = False
                 severity = "none"
@@ -189,6 +216,7 @@ class DriftMonitor:
                 drift_detected=drift_detected,
                 severity=severity,
                 description=desc,
+                practical_significance=practical_sig,
             ))
 
         # Overall Status
@@ -215,6 +243,7 @@ class DriftMonitor:
                 "p-value": f"{r.p_value:.4f}" if r.p_value >= 0.0001 else f"{r.p_value:.2e}",
                 "Distance Metric": round(r.distance_metric, 4),
                 "Drift Detected": "YES" if r.drift_detected else "NO",
+                "Practical Importance": r.practical_significance,
                 "Severity": r.severity.upper(),
                 "Description": r.description,
             })

@@ -54,6 +54,8 @@ class RecoveryExecutionResult:
     attempts: int
     outcome_summary: str
     error_details: Optional[str] = None
+    verification_passed: bool = True
+    verification_details: Optional[str] = None
 
 
 class RecoveryEngine:
@@ -267,8 +269,28 @@ class RecoveryEngine:
         quarantine_file_path: Optional[str],
         run_id: Optional[str] = None,
     ) -> RecoveryExecutionResult:
-        """Execute quarantine isolation and log recovery audit record."""
+        """Execute quarantine isolation with post-action disk verification."""
         count = len(quarantined_df)
+        
+        # Post-action verification
+        verif_passed = True
+        verif_details = ""
+        if quarantine_file_path:
+            q_file = Path(quarantine_file_path)
+            if not q_file.exists() and not quarantined_df.empty:
+                q_file.parent.mkdir(parents=True, exist_ok=True)
+                quarantined_df.to_csv(q_file, index=False)
+            if not q_file.exists() or q_file.stat().st_size == 0:
+                verif_passed = False
+                verif_details = "Quarantine verification failed: target file missing or empty."
+            else:
+                verif_passed = True
+                verif_details = f"Verified {count} quarantined records written to storage ({q_file.name})."
+        else:
+            verif_passed = True
+            verif_details = "Verified zero records required quarantine."
+
+        status_str = "SUCCESS" if verif_passed else "FAILED"
         summary = (
             f"Successfully isolated {count} invalid records into quarantine storage ({quarantine_file_path}). "
             "Downstream processing continued for valid subset."
@@ -276,26 +298,31 @@ class RecoveryEngine:
         action_id = log_recovery_action(
             trigger_event=RecoveryTrigger.INVALID_INCOMING_DATA.value,
             action_type=RecoveryActionType.QUARANTINE_RECORDS.value,
-            status="SUCCESS",
+            status=status_str,
             outcome_summary=summary,
             run_id=run_id,
             attempts=1,
+            error_details=None if verif_passed else verif_details,
         )
         log_system_event(
             event_type="DATA_QUARANTINE",
-            severity="WARNING",
+            severity="WARNING" if verif_passed else "ERROR",
             component="RECOVERY_ENGINE",
             description=summary,
             action_taken="ISOLATE_INVALID_RECORDS",
-            outcome="SUCCESS",
+            outcome=status_str,
+            error_details=None if verif_passed else verif_details,
         )
         return RecoveryExecutionResult(
             action_id=action_id,
             trigger=RecoveryTrigger.INVALID_INCOMING_DATA.value,
             action_type=RecoveryActionType.QUARANTINE_RECORDS.value,
-            status="SUCCESS",
+            status=status_str,
             attempts=1,
             outcome_summary=summary,
+            error_details=None if verif_passed else verif_details,
+            verification_passed=verif_passed,
+            verification_details=verif_details,
         )
 
     def execute_drift_retraining(
@@ -305,7 +332,7 @@ class RecoveryEngine:
         run_id: Optional[str] = None,
     ) -> RecoveryExecutionResult:
         """
-        Execute automated retraining triggered by drift, respecting cooldown.
+        Execute automated retraining triggered by drift, respecting cooldown and verifying outcome.
         """
         action_type = RecoveryActionType.TRIGGER_RETRAINING.value
         
@@ -328,6 +355,8 @@ class RecoveryEngine:
                     status="COOLED_DOWN",
                     attempts=1,
                     outcome_summary=msg,
+                    verification_passed=True,
+                    verification_details="Cooldown gate successfully prevented rapid repeated retraining loop.",
                 )
 
         promoted, msg, meta = self.registry.validate_and_register_candidate(
@@ -337,7 +366,36 @@ class RecoveryEngine:
             trigger_source="DRIFT_AUTO_RECOVERY",
         )
 
-        status_str = "SUCCESS" if promoted else "FAILED"
+        # Post-action verification
+        verif_passed = False
+        verif_details = ""
+        if promoted:
+            try:
+                # 1. Verify artifact exists and is loadable
+                art_path = meta.get("artifact_path")
+                if art_path and Path(art_path).exists():
+                    loaded = self.registry.load_model_artifact(art_path)
+                    # 2. Sanity test inference on 5 samples
+                    sample_x = training_df.head(5)
+                    test_preds = loaded["model"].predict(loaded["preprocessor"].transform(sample_x)[0])
+                    # 3. Verify active model in DB matches promoted version
+                    active_now = get_active_model(self.settings.database_path)
+                    if active_now and active_now["model_version"] == meta["version"] and len(test_preds) == 5:
+                        verif_passed = True
+                        verif_details = f"Post-retraining verification passed: {meta['version']} active and inference sanity verified."
+                    else:
+                        verif_details = "Verification failed: Active model version mismatch or inference test failed."
+                else:
+                    verif_details = "Verification failed: Trained model artifact not found on disk."
+            except Exception as e:
+                verif_passed = False
+                verif_details = f"Verification failed with exception: {str(e)}"
+        else:
+            # Candidate was rejected by validation gate
+            verif_passed = True
+            verif_details = f"Rejection policy verified: Candidate rejected ({meta.get('rejection_reason')}); active model preserved."
+
+        status_str = "SUCCESS" if (promoted and verif_passed) or (not promoted and verif_passed) else "FAILED"
         action_id = log_recovery_action(
             trigger_event=RecoveryTrigger.DATA_DRIFT_DETECTED.value,
             action_type=action_type,
@@ -345,7 +403,7 @@ class RecoveryEngine:
             outcome_summary=msg,
             run_id=run_id,
             attempts=1,
-            error_details=meta.get("rejection_reason"),
+            error_details=meta.get("rejection_reason") or (None if verif_passed else verif_details),
         )
 
         return RecoveryExecutionResult(
@@ -356,6 +414,8 @@ class RecoveryEngine:
             attempts=1,
             outcome_summary=msg,
             error_details=meta.get("rejection_reason"),
+            verification_passed=verif_passed,
+            verification_details=verif_details,
         )
 
     def execute_rollback(
@@ -364,12 +424,10 @@ class RecoveryEngine:
         run_id: Optional[str] = None,
     ) -> RecoveryExecutionResult:
         """
-        Execute rollback to a previously validated model version.
-        If target_version is None, selects the most recent healthy non-candidate model.
+        Execute rollback to a previously validated model version with post-action verification.
         """
         history = get_model_history(self.settings.database_path)
         if not target_version:
-            # Find the most recent active or archived model that was not rejected
             healthy_models = [m for m in history if m["status"] in ["archived", "active"]]
             if len(healthy_models) < 2 and not healthy_models:
                 fail_msg = "Rollback aborted: No validated previous model exists in registry."
@@ -389,8 +447,9 @@ class RecoveryEngine:
                     attempts=1,
                     outcome_summary=fail_msg,
                     error_details="No fallback model found.",
+                    verification_passed=False,
+                    verification_details="No historical model artifact available in database.",
                 )
-            # Pick the second one if the first is active, or the first archived
             target_version = (
                 healthy_models[1]["model_version"]
                 if len(healthy_models) > 1 and healthy_models[0]["status"] == "active"
@@ -398,7 +457,30 @@ class RecoveryEngine:
             )
 
         success, msg = self.registry.rollback_to_version(target_version)
-        status_str = "SUCCESS" if success else "FAILED"
+        
+        # Post-action verification
+        verif_passed = False
+        verif_details = ""
+        if success:
+            try:
+                active_now = get_active_model(self.settings.database_path)
+                if active_now and active_now["model_version"] == target_version:
+                    # Sanity check load artifact
+                    art = self.registry.load_model_artifact(active_now["artifact_path"])
+                    if art and "model" in art:
+                        verif_passed = True
+                        verif_details = f"Rollback verified: Model {target_version} successfully restored to active state and artifact verified."
+                    else:
+                        verif_details = "Rollback verification failed: Model artifact payload incomplete."
+                else:
+                    verif_details = f"Rollback verification failed: Registry active version does not match target {target_version}."
+            except Exception as e:
+                verif_passed = False
+                verif_details = f"Rollback verification failed: {str(e)}"
+        else:
+            verif_details = f"Rollback aborted: {msg}"
+
+        status_str = "SUCCESS" if (success and verif_passed) else "FAILED"
 
         action_id = log_recovery_action(
             trigger_event=RecoveryTrigger.DEPLOYMENT_FAILURE.value,
@@ -408,6 +490,7 @@ class RecoveryEngine:
             run_id=run_id,
             attempts=1,
             db_path=self.settings.database_path,
+            error_details=None if verif_passed else verif_details,
         )
 
         return RecoveryExecutionResult(
@@ -417,4 +500,48 @@ class RecoveryEngine:
             status=status_str,
             attempts=1,
             outcome_summary=msg,
+            error_details=None if verif_passed else verif_details,
+            verification_passed=verif_passed,
+            verification_details=verif_details,
+        )
+
+    def execute_alert_and_halt(
+        self,
+        reason: str = "",
+        run_id: Optional[str] = None,
+        incident_description: Optional[str] = None,
+    ) -> RecoveryExecutionResult:
+        """Halt pipeline processing and log an immutable critical alert."""
+        final_reason = incident_description or reason or "Critical unrecoverable anomaly"
+        summary = f"Pipeline safety halt triggered: {final_reason}"
+        action_id = log_recovery_action(
+            trigger_event="CRITICAL_PIPELINE_FAULT",
+            action_type=RecoveryActionType.ALERT_AND_HALT.value,
+            status="HALTED",
+            outcome_summary=summary,
+            run_id=run_id,
+            attempts=1,
+            error_details=final_reason,
+            db_path=self.settings.database_path,
+        )
+        log_system_event(
+            event_type="PIPELINE_HALTED_ALERT",
+            severity="CRITICAL",
+            component="RECOVERY_ENGINE",
+            description=summary,
+            action_taken="ALERT_AND_HALT",
+            outcome="HALTED",
+            error_details=final_reason,
+            db_path=self.settings.database_path,
+        )
+        return RecoveryExecutionResult(
+            action_id=action_id,
+            trigger="CRITICAL_PIPELINE_FAULT",
+            action_type=RecoveryActionType.ALERT_AND_HALT.value,
+            status="HALTED",
+            attempts=1,
+            outcome_summary=summary,
+            error_details=final_reason,
+            verification_passed=True,
+            verification_details="Pipeline halted safely and audit alert logged.",
         )

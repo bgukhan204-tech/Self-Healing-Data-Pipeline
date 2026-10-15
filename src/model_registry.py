@@ -127,19 +127,30 @@ class ModelRegistryManager:
         else:
             # Active model exists: compare performance on validation set
             active_f1 = float(active_model_info.get("f1_score", 0.0))
-            
-            # Acceptance criteria: F1 >= min_f1 AND F1 >= active_f1 - tolerance
+            active_eval_f1 = None
+            try:
+                active_artifact_path = active_model_info.get("artifact_path")
+                if active_artifact_path and Path(active_artifact_path).exists():
+                    active_artifact = self.load_model_artifact(active_artifact_path)
+                    active_report = evaluate_existing_model(active_artifact, val_df)
+                    active_eval_f1 = active_report.f1_score
+            except Exception:
+                active_eval_f1 = None
+
+            comparison_f1 = active_eval_f1 if active_eval_f1 is not None else active_f1
+
+            # Acceptance criteria: F1 >= min_f1 AND F1 >= comparison_f1 - tolerance
             if report.f1_score < min_f1:
                 is_promoted = False
                 status = "rejected"
                 rejection_reason = f"F1-score ({report.f1_score:.4f}) below absolute minimum threshold ({min_f1:.4f})."
                 msg = f"Candidate {version} rejected: {rejection_reason}"
-            elif report.f1_score < (active_f1 - tolerance):
+            elif report.f1_score < (comparison_f1 - tolerance):
                 is_promoted = False
                 status = "rejected"
                 rejection_reason = (
                     f"Candidate F1 ({report.f1_score:.4f}) degraded by more than allowed tolerance "
-                    f"({tolerance * 100:.1f}%) compared to active model {active_model_info['model_version']} (F1: {active_f1:.4f})."
+                    f"({tolerance * 100:.1f}%) compared to active model {active_model_info['model_version']} (Benchmark F1: {comparison_f1:.4f})."
                 )
                 msg = f"Candidate {version} rejected: {rejection_reason}"
             else:
@@ -147,7 +158,7 @@ class ModelRegistryManager:
                 status = "active"
                 msg = (
                     f"Candidate model {version} passed validation gates and was promoted to ACTIVE! "
-                    f"(Candidate F1: {report.f1_score:.4f} vs Active F1: {active_f1:.4f})"
+                    f"(Candidate F1: {report.f1_score:.4f} vs Benchmark F1: {comparison_f1:.4f})"
                 )
 
         # 3. Register in SQLite

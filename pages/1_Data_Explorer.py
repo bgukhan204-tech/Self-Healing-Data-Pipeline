@@ -82,27 +82,51 @@ with tab1:
             st.markdown("##### 📊 Column Health & Types")
             st.dataframe(report.column_summary, use_container_width=True, hide_index=True)
 
+        if report.missing_required_columns:
+            st.error(f"🛑 **Missing Required Schema Columns**: `{', '.join(report.missing_required_columns)}`. Dataset fails schema validation.")
+
         # Flagged issues breakdown
         if report.quarantined_records_count > 0:
             st.markdown("##### 🚨 Flagged Issues & Reasons")
             st.dataframe(report.quarantine_reasons_df, use_container_width=True, hide_index=True)
 
-            # Download Quarantine Report
-            csv_buf = io.StringIO()
-            report.quarantined_df.to_csv(csv_buf, index=True)
-            st.download_button(
-                label="📥 Download Quarantined Records (CSV)",
-                data=csv_buf.getvalue(),
-                file_name=f"quarantined_{dataset_name}",
-                mime="text/csv",
-                use_container_width=False,
-            )
+        # Download Buttons Row
+        st.markdown("##### 📥 Export Processed Subsets")
+        dl_col1, dl_col2 = st.columns(2)
+        with dl_col1:
+            if not report.valid_df.empty:
+                val_buf = io.StringIO()
+                report.valid_df.to_csv(val_buf, index=False)
+                st.download_button(
+                    label=f"📥 Download Validated Records ({len(report.valid_df):,} rows)",
+                    data=val_buf.getvalue(),
+                    file_name=f"validated_{dataset_name}",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+            else:
+                st.info("No valid records available to export.")
+
+        with dl_col2:
+            if not report.quarantined_df.empty:
+                q_buf = io.StringIO()
+                report.quarantined_df.to_csv(q_buf, index=True)
+                st.download_button(
+                    label=f"📥 Download Quarantined Records ({len(report.quarantined_df):,} rows)",
+                    data=q_buf.getvalue(),
+                    file_name=f"quarantined_{dataset_name}",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+            else:
+                st.caption("No records quarantined for this batch.")
 
         # Action: Process through full pipeline
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("🚀 Process Valid Subset Through Full Pipeline", type="primary", use_container_width=True):
             with st.spinner("Processing through anomaly detection, drift monitoring, and recovery engine..."):
                 res = orchestrator.process_incoming_batch(df_to_analyze, dataset_name=dataset_name)
+                st.session_state.latest_run_result = res
                 st.success(f"Pipeline executed! Run ID: {res.run_id} | Status: {res.status}")
                 st.info(f"Anomalies: {res.records_anomalous} | Quarantined: {res.records_quarantined} | Drift: {res.drift_report.overall_drift_status if res.drift_report else 'N/A'}")
 
@@ -137,6 +161,7 @@ with tab2:
         if st.button(f"⚡ Ingest & Process '{selected_sample}'", key="ingest_bundled"):
             with st.spinner("Executing end-to-end pipeline run..."):
                 res = orchestrator.process_incoming_batch(sample_df, dataset_name=file_rel)
+                st.session_state.latest_run_result = res
                 st.success(f"Processed successfully! Status: {res.status} | Run ID: {res.run_id}")
                 st.rerun()
 

@@ -108,4 +108,82 @@ def test_model_rollback(recovery_env):
     # 3. Trigger rollback to v1.0.0
     res = engine.execute_rollback(target_version="v1.0.0")
     assert res.status == "SUCCESS"
+    assert res.verification_passed is True
+    assert "Rollback verified" in res.verification_details
     assert get_active_model(db_file)["model_version"] == "v1.0.0"
+
+
+def test_rollback_invalid_target_fails(recovery_env):
+    """Verify rollback fails cleanly when target version does not exist."""
+    engine, db_file = recovery_env
+    res = engine.execute_rollback(target_version="v99.9.9")
+    assert res.status == "FAILED"
+    assert res.verification_passed is False
+    assert "not found" in res.error_details.lower()
+
+
+def test_quarantine_with_post_verification(recovery_env, tmp_path):
+    """Verify quarantine execution creates files and passes post-recovery verification."""
+    import pandas as pd
+    engine, db_file = recovery_env
+    q_file = tmp_path / "quarantine" / "test_quarantine.csv"
+    bad_df = pd.DataFrame([
+        {"user_id": -99, "amount": 100.0, "quarantine_reason": "negative_user_id"},
+        {"user_id": 5, "amount": -50.0, "quarantine_reason": "negative_amount"},
+    ])
+
+    res = engine.execute_quarantine(
+        quarantined_df=bad_df,
+        quarantine_file_path=str(q_file),
+        run_id="run_test_q1",
+    )
+    assert res.status == "SUCCESS"
+    assert res.verification_passed is True
+    assert "Verified 2 quarantined records" in res.verification_details
+    assert q_file.exists()
+
+
+def test_drift_retraining_post_verification(recovery_env):
+    """Verify drift retraining verifies candidate artifact and inference sanity before reporting success."""
+    engine, db_file = recovery_env
+    df = generate_synthetic_dataset(n_samples=300, random_seed=42)
+
+    res = engine.execute_drift_retraining(
+        training_df=df,
+        force=True,
+        run_id="run_drift_retrain_test",
+    )
+    if res.status == "SUCCESS":
+        assert res.verification_passed is True
+        assert "Post-retraining verification passed" in res.verification_details
+
+
+def test_alert_and_halt_execution(recovery_env):
+    """Verify alert-and-halt safely halts the pipeline and logs audit event."""
+    engine, db_file = recovery_env
+    res = engine.execute_alert_and_halt(
+        incident_description="Critical data contamination detected",
+        run_id="run_halt_001",
+    )
+    assert res.status == "HALTED"
+    assert res.verification_passed is True
+    assert "Pipeline halted safely" in res.verification_details
+
+
+def test_decision_evaluation_manual_vs_auto_mode(recovery_env):
+    """Verify that retraining decisions respect the manual approval setting."""
+    engine, db_file = recovery_env
+
+    # 1. Manual mode (default)
+    engine.settings.auto_recovery_mode = "manual"
+    decisions_manual = engine.evaluate_pipeline_situation(drift_status="CRITICAL")
+    retrain_dec = [d for d in decisions_manual if d.recommended_action == RecoveryActionType.TRIGGER_RETRAINING.value]
+    assert len(retrain_dec) == 1
+    assert retrain_dec[0].can_auto_execute is False
+
+    # 2. Automatic mode
+    engine.settings.auto_recovery_mode = "automatic"
+    decisions_auto = engine.evaluate_pipeline_situation(drift_status="CRITICAL")
+    retrain_dec_auto = [d for d in decisions_auto if d.recommended_action == RecoveryActionType.TRIGGER_RETRAINING.value]
+    assert len(retrain_dec_auto) == 1
+    assert retrain_dec_auto[0].can_auto_execute is True

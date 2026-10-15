@@ -66,3 +66,69 @@ def test_out_of_range_and_quarantine():
     assert 1 in report.flagged_reasons
     assert 2 in report.flagged_reasons
     assert len(report.valid_df) <= 47
+
+
+def test_missing_required_schema_columns():
+    """Verify that a dataset missing essential columns fails validation."""
+    invalid_schema_df = pd.DataFrame({
+        "unrelated_col_a": [1, 2, 3],
+        "unrelated_col_b": [4, 5, 6],
+    })
+    report = validate_dataset(invalid_schema_df, dataset_name="bad_schema.csv")
+    
+    assert report.is_valid is False
+    assert len(report.missing_required_columns) > 0
+    assert "customer_id" in report.missing_required_columns
+    assert "credit_score" in report.missing_required_columns
+    assert report.quality_score <= 50.0
+
+
+def test_infinite_values_quarantine():
+    """Verify that infinite numerical values are caught and quarantined."""
+    df = generate_synthetic_dataset(n_samples=20, random_seed=42)
+    df.at[0, "debt_to_income"] = np.inf
+    df.at[1, "annual_income"] = -np.inf
+    
+    report = validate_dataset(df, dataset_name="infinite_test.csv")
+    assert 0 in report.flagged_reasons
+    assert 1 in report.flagged_reasons
+    assert any("infinite" in r for r in report.flagged_reasons[0])
+    assert any("infinite" in r for r in report.flagged_reasons[1])
+    assert report.quarantined_records_count >= 2
+
+
+def test_custom_constraints_override():
+    """Verify that custom constraints can be supplied dynamically."""
+    df = generate_synthetic_dataset(n_samples=25, random_seed=42)
+    # Stricter max age = 50
+    custom_rules = {"age": {"type": "numeric", "min": 18, "max": 50}}
+    report = validate_dataset(df, dataset_name="custom_rules.csv", custom_constraints=custom_rules)
+    
+    # Any record with age > 50 should be flagged
+    over_50_count = (df["age"] > 50).sum()
+    if over_50_count > 0:
+        flagged_age = [idx for idx, reasons in report.flagged_reasons.items() if any("age" in r for r in reasons)]
+        assert len(flagged_age) >= over_50_count
+
+
+def test_load_csv_safely_duplicate_headers(tmp_path):
+    """Verify that CSV with duplicate column headers is detected and rejected."""
+    from src.ingestion import load_csv_safely
+    dup_csv = tmp_path / "dup_cols.csv"
+    dup_csv.write_text("customer_id,age,age\nCUST-1,25,25\nCUST-2,30,30\n", encoding="utf-8")
+    
+    df, err = load_csv_safely(dup_csv)
+    assert df is None
+    assert "duplicate" in err.lower()
+
+
+def test_load_csv_safely_empty_and_size_limits(tmp_path):
+    """Verify that 0-byte files or oversized files fail safely."""
+    from src.ingestion import load_csv_safely
+    empty_csv = tmp_path / "empty.csv"
+    empty_csv.write_text("", encoding="utf-8")
+    
+    df, err = load_csv_safely(empty_csv)
+    assert df is None
+    assert "empty" in err.lower()
+

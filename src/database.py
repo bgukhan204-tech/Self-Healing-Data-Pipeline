@@ -143,6 +143,7 @@ def init_db(db_path: Optional[Path] = None) -> None:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_anomaly_events_run ON anomaly_events(run_id);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_drift_events_run ON drift_events(run_id);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_recovery_actions_run ON recovery_actions(run_id);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_recovery_actions_lookup ON recovery_actions(action_type, status, created_at);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_model_registry_status ON model_registry(status);")
 
         conn.commit()
@@ -499,7 +500,7 @@ def get_latest_metrics_summary(db_path: Optional[Path] = None) -> Dict[str, Any]
             SELECT COUNT(*) as drifted_count 
             FROM drift_events 
             WHERE drift_detected = 1 
-              AND created_at >= datetime('now', '-24 hours')
+              AND datetime(created_at) >= datetime('now', '-24 hours')
         """)
         drift_row = cursor.fetchone()
         row["drift_events_24h"] = drift_row["drifted_count"] if drift_row else 0

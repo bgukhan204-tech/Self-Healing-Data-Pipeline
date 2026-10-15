@@ -124,7 +124,8 @@ with col_right:
         
         if valid_rollback_targets:
             target_ver = st.selectbox("Select Target Version to Restore:", valid_rollback_targets)
-            if st.button("⏪ Execute Version Rollback", use_container_width=True):
+            confirm_rollback = st.checkbox(f"⚠️ Confirm demoting current active model and restoring {target_ver}", key="chk_confirm_rollback")
+            if st.button("⏪ Execute Version Rollback", disabled=not confirm_rollback, use_container_width=True, type="secondary"):
                 with st.spinner(f"Validating artifact and rolling back to {target_ver}..."):
                     success, rollback_msg = registry.rollback_to_version(target_ver)
                     if success:

@@ -9,6 +9,20 @@ from config.settings import get_settings
 
 
 # Domain validation rules for our Credit/Financial Pipeline
+REQUIRED_COLUMNS = [
+    "customer_id",
+    "age",
+    "annual_income",
+    "credit_score",
+    "debt_to_income",
+    "loan_amount",
+    "employment_years",
+    "num_open_accounts",
+    "education_level",
+    "home_ownership",
+    "loan_intent",
+]
+
 COLUMN_CONSTRAINTS = {
     "age": {"type": "numeric", "min": 18, "max": 100},
     "annual_income": {"type": "numeric", "min": 0, "max": 1000000},
@@ -49,12 +63,15 @@ class ValidationReport:
     column_summary: pd.DataFrame
     quarantine_file_path: Optional[str] = None
     quarantine_reasons_df: Optional[pd.DataFrame] = None
+    missing_required_columns: List[str] = field(default_factory=list)
 
 
 def validate_dataset(
     df: pd.DataFrame,
     dataset_name: str = "batch",
     quarantine_on_severe_issues: bool = True,
+    required_columns: Optional[List[str]] = None,
+    custom_constraints: Optional[Dict[str, Any]] = None,
 ) -> ValidationReport:
     """
     Validate dataset against schema and constraints, scoring overall quality
@@ -74,11 +91,23 @@ def validate_dataset(
             valid_df=pd.DataFrame(),
             quarantined_df=pd.DataFrame(),
             column_summary=empty_summary,
+            missing_required_columns=list(required_columns or REQUIRED_COLUMNS),
         )
 
+    # Reset index to ensure 0..N-1 contiguous integer indexing
+    df = df.reset_index(drop=True)
     total_records = len(df)
     total_cells = df.size
     
+    # Schema check: verify expected required columns
+    expected_cols = list(required_columns if required_columns is not None else REQUIRED_COLUMNS)
+    missing_required = [c for c in expected_cols if c not in df.columns]
+    
+    # Active constraints mapping
+    active_constraints = dict(COLUMN_CONSTRAINTS)
+    if custom_constraints:
+        active_constraints.update(custom_constraints)
+
     # 1. Missing values check
     missing_counts = df.isnull().sum()
     total_missing_cells = int(missing_counts.sum())
@@ -102,7 +131,7 @@ def validate_dataset(
             reasons.append("Exact duplicate row")
             is_quarantine_level = True
 
-        for col, rules in COLUMN_CONSTRAINTS.items():
+        for col, rules in active_constraints.items():
             if col not in df.columns:
                 continue
             
@@ -110,7 +139,7 @@ def validate_dataset(
             if pd.isna(val):
                 reasons.append(f"Missing value in '{col}'")
                 # Missing in critical identifiers or key features
-                if col in ["customer_id", "loan_status", "annual_income"]:
+                if col in ["customer_id", "loan_status", "annual_income", "credit_score"]:
                     is_quarantine_level = True
                 continue
 
@@ -118,14 +147,18 @@ def validate_dataset(
             if rule_type == "numeric":
                 try:
                     num_val = float(val)
-                    min_val = rules.get("min")
-                    max_val = rules.get("max")
-                    if min_val is not None and num_val < min_val:
-                        reasons.append(f"'{col}' value ({num_val}) below minimum ({min_val})")
+                    if np.isinf(num_val) or np.isnan(num_val):
+                        reasons.append(f"'{col}' contains invalid or infinite numerical value: '{val}'")
                         is_quarantine_level = True
-                    elif max_val is not None and num_val > max_val:
-                        reasons.append(f"'{col}' value ({num_val}) above maximum ({max_val})")
-                        is_quarantine_level = True
+                    else:
+                        min_val = rules.get("min")
+                        max_val = rules.get("max")
+                        if min_val is not None and num_val < min_val:
+                            reasons.append(f"'{col}' value ({num_val}) below minimum ({min_val})")
+                            is_quarantine_level = True
+                        elif max_val is not None and num_val > max_val:
+                            reasons.append(f"'{col}' value ({num_val}) above maximum ({max_val})")
+                            is_quarantine_level = True
                 except (ValueError, TypeError):
                     reasons.append(f"'{col}' could not be converted to float: '{val}'")
                     is_quarantine_level = True
@@ -151,15 +184,18 @@ def validate_dataset(
 
     # 5. Calculate Data Quality Score (0-100)
     # Deductions:
-    # - Up to 35 points for missing cells
-    # - Up to 25 points for duplicate rows
-    # - Up to 40 points for invalid / out-of-range cells
+    # - Up to 40 points for missing required schema columns
+    # - Up to 30 points for missing cells
+    # - Up to 20 points for duplicate rows
+    # - Up to 35 points for invalid / out-of-range cells
     invalid_cells_ratio = len(flagged_reasons) / total_records if total_records > 0 else 0.0
     
     score = 100.0
-    score -= min(35.0, missing_cell_ratio * 150.0)
-    score -= min(25.0, duplicate_ratio * 100.0)
-    score -= min(40.0, invalid_cells_ratio * 60.0)
+    if missing_required:
+        score -= min(60.0, len(missing_required) * 12.0)
+    score -= min(30.0, missing_cell_ratio * 150.0)
+    score -= min(20.0, duplicate_ratio * 100.0)
+    score -= min(35.0, invalid_cells_ratio * 60.0)
     quality_score = float(np.clip(round(score, 1), 0.0, 100.0))
 
     # 6. Build column summary table
@@ -192,8 +228,10 @@ def validate_dataset(
     # 7. Build reasons dataframe for reporting & export
     reasons_list = []
     for idx, reasons in flagged_reasons.items():
+        row_id = df.at[idx, "customer_id"] if "customer_id" in df.columns else str(idx)
         reasons_list.append({
             "row_index": idx,
+            "record_id": str(row_id),
             "is_quarantined": idx in quarantined_indices,
             "issue_count": len(reasons),
             "reasons": " | ".join(reasons)
@@ -217,7 +255,11 @@ def validate_dataset(
         export_q.to_csv(q_path, index=True)
         quarantine_file_path = str(q_path)
 
-    is_valid = quality_score >= 60.0 and len(valid_df) > 0
+    is_valid = (
+        len(missing_required) == 0
+        and quality_score >= 60.0
+        and len(valid_df) > 0
+    )
 
     return ValidationReport(
         is_valid=is_valid,
@@ -233,4 +275,5 @@ def validate_dataset(
         column_summary=column_summary,
         quarantine_file_path=quarantine_file_path,
         quarantine_reasons_df=quarantine_reasons_df,
+        missing_required_columns=missing_required,
     )

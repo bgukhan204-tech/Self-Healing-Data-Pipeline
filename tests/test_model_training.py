@@ -64,3 +64,28 @@ def test_candidate_promotion_and_rejection(setup_env):
     
     # Active model must remain the original good version
     assert get_active_model(db_file)["model_version"] == meta["version"]
+
+
+def test_train_gradient_boosting():
+    """Verify training with GradientBoosting handles class weights and returns valid metrics."""
+    df = generate_synthetic_dataset(n_samples=250, random_seed=42)
+    model, preproc, report, (train_df, val_df) = train_model(
+        df=df,
+        algorithm="GradientBoosting",
+        random_seed=42,
+    )
+    assert report.f1_score > 0.40
+    assert len(report.confusion_matrix) == 2
+    assert len(report.confusion_matrix[0]) == 2
+
+
+def test_rollback_missing_or_corrupt_artifact(setup_env):
+    """Verify that rollback fails safely if the target artifact is missing or corrupted."""
+    db_file, model_dir = setup_env
+    mgr = ModelRegistryManager()
+    
+    # Non-existent version
+    success, msg = mgr.rollback_to_version("v999.0.0")
+    assert success is False
+    assert "not found" in msg.lower()
+

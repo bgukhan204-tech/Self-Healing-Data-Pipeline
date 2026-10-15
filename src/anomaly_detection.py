@@ -111,19 +111,26 @@ class AnomalyDetector:
                 anomalous_records_df=pd.DataFrame(),
             )
 
-        X_raw = incoming_df[self.features].to_numpy()
+        # Align incoming_df with self.features safely (handle missing columns or non-numeric types)
+        aligned_df = pd.DataFrame(index=incoming_df.index)
+        for f in self.features:
+            if f in incoming_df.columns:
+                aligned_df[f] = pd.to_numeric(incoming_df[f], errors="coerce")
+            else:
+                aligned_df[f] = np.nan
+        X_raw = aligned_df.to_numpy()
+
         X_imputed = self.imputer.transform(X_raw)
         X_scaled = self.scaler.transform(X_imputed)
 
         # 1. Isolation Forest predictions
         # -1 = anomaly, 1 = normal
-        raw_preds = self.model.predict(X_scaled)
+        raw_preds = np.atleast_1d(self.model.predict(X_scaled))
         is_anomaly = (raw_preds == -1)
 
         # Decision function: lower values mean more anomalous
-        raw_decisions = self.model.decision_function(X_scaled)
+        raw_decisions = np.atleast_1d(self.model.decision_function(X_scaled))
         # Normalize decision function to an anomaly score between 0.0 and 1.0 (higher = more anomalous)
-        # Decision function typically spans [-0.5, 0.5]
         anomaly_scores = np.clip(0.5 - raw_decisions, 0.0, 1.0)
 
         # 2. Statistical Baseline (Z-score test where |z| > 3.0)

@@ -144,16 +144,24 @@ def generate_synthetic_dataset(
 def load_csv_safely(
     file_source: Union[str, Path, io.BytesIO],
     max_size_mb: Optional[int] = None,
+    max_rows: int = 100000,
 ) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
     """
     Safely load a CSV from a file path or file-like buffer with validation.
+    
+    Protects against:
+    - Path traversal and nonexistent paths
+    - File size limits and empty buffers
+    - Encoding issues (UTF-8, Latin-1 fallback)
+    - Duplicate column headers
+    - Empty or malformed CSV rows
     
     Returns:
         (DataFrame, None) on success
         (None, error_message) on failure
     """
     settings = get_settings()
-    max_mb = max_size_mb or settings.max_upload_size_mb
+    max_mb = max_size_mb if max_size_mb is not None else settings.max_upload_size_mb
     
     # 1. Size checking if it's a file buffer
     if hasattr(file_source, "getbuffer"):
@@ -173,32 +181,53 @@ def load_csv_safely(
         if p.stat().st_size > max_mb * 1024 * 1024:
             return None, f"File exceeds maximum allowed size ({max_mb} MB)."
 
-    # 3. Read CSV with encoding fallback
+    # 3. Read CSV with encoding fallback and error handling
     try:
         if hasattr(file_source, "seek"):
             file_source.seek(0)
-        df = pd.read_csv(file_source, encoding="utf-8")
+        df = pd.read_csv(file_source, encoding="utf-8", nrows=max_rows)
     except UnicodeDecodeError:
         try:
             if hasattr(file_source, "seek"):
                 file_source.seek(0)
-            df = pd.read_csv(file_source, encoding="latin1")
+            df = pd.read_csv(file_source, encoding="latin1", nrows=max_rows)
         except Exception as e:
             return None, f"Failed to parse CSV due to encoding error: {str(e)}"
+    except pd.errors.EmptyDataError:
+        return None, "CSV file is empty or contains no parseable columns."
+    except pd.errors.ParserError as e:
+        return None, f"Malformed CSV formatting error: {str(e)}"
     except Exception as e:
         return None, f"CSV parsing error: {str(e)}"
         
     if df.empty:
         return None, "Parsed CSV contains no rows or columns."
+
+    # 4. Check for duplicate column names in the parsed dataframe
+    col_counts = pd.Series(df.columns).value_counts()
+    dupes = col_counts[col_counts > 1].index.tolist()
+    if dupes:
+        return None, f"CSV contains duplicate column headers: {', '.join(dupes)}"
+
+    # Check for pandas auto-renamed duplicates (e.g. 'col.1') when headers had identical names
+    header_stems = [c.rsplit(".", 1)[0] for c in df.columns if "." in c and c.rsplit(".", 1)[1].isdigit()]
+    if any(stem in df.columns for stem in header_stems):
+        # Discovered duplicate headers that pandas mangled with .1, .2
+        mangled = [c for c in df.columns if any(c.startswith(f"{s}.") for s in header_stems)]
+        return None, f"CSV contains duplicate column headers (detected: {', '.join(mangled)})"
         
     return df, None
 
 
 def save_uploaded_batch(df: pd.DataFrame, original_filename: str) -> Path:
-    """Persist an uploaded dataset safely with timestamp."""
+    """Persist an uploaded dataset safely with sanitization and timestamp prefix."""
+    from datetime import datetime, timezone
     settings = get_settings()
     settings.uploads_dir.mkdir(parents=True, exist_ok=True)
-    clean_name = Path(original_filename).name.replace(" ", "_")
-    target_path = settings.uploads_dir / clean_name
+    # Sanitize filename against directory traversal
+    clean_base = Path(original_filename).name.replace(" ", "_")
+    time_prefix = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    safe_name = f"{time_prefix}_{clean_base}"
+    target_path = settings.uploads_dir / safe_name
     df.to_csv(target_path, index=False)
     return target_path

@@ -103,9 +103,52 @@ if target_file.exists():
 
     st.markdown("<hr style='border:none; border-top:1px solid rgba(255,255,255,0.06); margin:14px 0;'>", unsafe_allow_html=True)
 
-    # Row 2: Feature-Level Drift Table
-    st.markdown("#### 2. Feature-Level Statistical Test Results")
-    st.dataframe(drift_report.summary_df, use_container_width=True, hide_index=True)
+    # Row 2: Feature-Level Drift Table & Investigation Toolkit
+    st.markdown("#### 2. Feature-Level Statistical Drift Investigation")
+    
+    # Filter and Sort controls
+    filt_col1, filt_col2, filt_col3, filt_col4 = st.columns(4)
+    with filt_col1:
+        sev_filter = st.selectbox("Filter Severity:", ["ALL", "CRITICAL", "WARNING", "NONE"], index=0)
+    with filt_col2:
+        test_filter = st.selectbox("Filter Test Method:", ["ALL", "ks_test", "chi_square"], index=0)
+    with filt_col3:
+        sort_by = st.selectbox("Sort Features By:", ["Distance Metric (High to Low)", "p-value (Low to High)", "Feature Name"])
+    with filt_col4:
+        only_drifted = st.checkbox("Show Only Drifted Features", value=False)
+
+    # Apply filters
+    display_summary = drift_report.summary_df.copy()
+    if sev_filter != "ALL":
+        display_summary = display_summary[display_summary["Severity"] == sev_filter]
+    if test_filter != "ALL":
+        display_summary = display_summary[display_summary["Test"] == test_filter]
+    if only_drifted:
+        display_summary = display_summary[display_summary["Drift Detected"] == "YES"]
+
+    # Apply sorting
+    if sort_by == "Distance Metric (High to Low)":
+        display_summary = display_summary.sort_values("Distance Metric", ascending=False)
+    elif sort_by == "p-value (Low to High)":
+        display_summary = display_summary.sort_values("p-value", ascending=True)
+    elif sort_by == "Feature Name":
+        display_summary = display_summary.sort_values("Feature", ascending=True)
+
+    st.dataframe(display_summary, use_container_width=True, hide_index=True)
+
+    # Download summary CSV
+    exp_col1, exp_col2 = st.columns([0.3, 0.7])
+    with exp_col1:
+        import io
+        drift_csv = io.StringIO()
+        display_summary.to_csv(drift_csv, index=False)
+        st.download_button(
+            label="📥 Download Drift Investigation Report (CSV)",
+            data=drift_csv.getvalue(),
+            file_name=f"drift_investigation_{file_map[drift_batch_choice]}",
+            mime="text/csv",
+            use_container_width=True,
+        )
 
     # Row 3: Interactive Distribution Overlay
     st.markdown("#### 3. Distribution Overlay (Reference vs Incoming Batch)")

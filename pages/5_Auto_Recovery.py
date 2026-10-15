@@ -71,8 +71,121 @@ with col_params:
 
 st.markdown("<hr style='border:none; border-top:1px solid rgba(255,255,255,0.06); margin:18px 0;'>", unsafe_allow_html=True)
 
-# Row 2: Supported Recovery Policy Matrix
-st.markdown("#### 3. Standardized Recovery Policies")
+# Row 2: Interactive Incident & Manual Recovery Center
+st.markdown("#### 3. Incident & Recovery Action Center")
+
+tab_incidents, tab_interventions = st.tabs(["⚡ Pending Incidents & Recommendations", "🛠️ Manual Operator Interventions"])
+
+with tab_incidents:
+    latest_run = st.session_state.get("latest_run_result", None)
+    pending_decisions = []
+    if latest_run and getattr(latest_run, "recovery_decisions", None):
+        pending_decisions = latest_run.recovery_decisions
+
+    if pending_decisions:
+        st.write(f"**Found {len(pending_decisions)} recovery recommendations from recent run `{latest_run.run_id}`:**")
+        for idx, dec in enumerate(pending_decisions):
+            trigger_name = dec.trigger.value if hasattr(dec.trigger, "value") else str(dec.trigger)
+            action_name = dec.recommended_action.value if hasattr(dec.recommended_action, "value") else str(dec.recommended_action)
+            with st.container():
+                st.markdown(
+                    f"""
+                    <div style="background:#111827; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px 16px; margin-bottom:10px;">
+                        <span style="font-weight:600; color:#F59E0B;">Trigger: {trigger_name}</span> &rarr; 
+                        <span style="font-weight:600; color:#38BDF8;">Recommended Action: {action_name}</span>
+                        <div style="color:#94A3B8; font-size:0.85rem; margin-top:4px;">{dec.explanation}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                btn_col1, btn_col2 = st.columns([0.3, 0.7])
+                with btn_col1:
+                    if st.button(f"Approve & Execute: {action_name}", key=f"btn_approve_{idx}", type="primary"):
+                        with st.spinner(f"Executing {action_name}..."):
+                            rec_res = None
+                            if action_name == RecoveryActionType.TRIGGER_RETRAINING.value:
+                                rec_res = engine.execute_drift_retraining(
+                                    training_df=orchestrator.reference_data,
+                                    force=False,
+                                    run_id=latest_run.run_id,
+                                )
+                            elif action_name == RecoveryActionType.ROLLBACK_MODEL.value:
+                                rec_res = engine.execute_rollback(run_id=latest_run.run_id)
+                            elif action_name == RecoveryActionType.ALERT_AND_HALT.value:
+                                rec_res = engine.execute_alert_and_halt(
+                                    reason=dec.explanation,
+                                    run_id=latest_run.run_id,
+                                )
+                            else:
+                                st.info(f"Action '{action_name}' does not require manual dispatch.")
+
+                            if rec_res:
+                                st.session_state.last_manual_recovery_res = rec_res
+                                st.rerun()
+    else:
+        st.info("No unhandled incidents or pending recommendations currently requiring manual approval.")
+
+    if "last_manual_recovery_res" in st.session_state:
+        m_res = st.session_state.last_manual_recovery_res
+        v_color = "#10B981" if m_res.verification_passed else "#EF4444"
+        v_icon = "✅" if m_res.verification_passed else "❌"
+        st.markdown(
+            f"""
+            <div style="background:rgba(16, 185, 129, 0.08); border:1px solid {v_color}; border-radius:8px; padding:12px 16px; margin-top:14px;">
+                <div style="font-weight:600; color:{v_color};">{v_icon} Post-Recovery Verification: {'PASSED' if m_res.verification_passed else 'FAILED'}</div>
+                <div style="font-size:0.88rem; color:#CBD5E1; margin-top:4px;"><b>Action:</b> {m_res.action_type} (Status: {m_res.status})</div>
+                <div style="font-size:0.85rem; color:#94A3B8; margin-top:2px;"><b>Verification Details:</b> {m_res.verification_details or 'N/A'}</div>
+                <div style="font-size:0.85rem; color:#94A3B8; margin-top:2px;"><b>Outcome:</b> {m_res.outcome_summary}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+with tab_interventions:
+    st.write("Execute ad-hoc emergency self-healing procedures under explicit operator authority:")
+    int_col1, int_col2, int_col3 = st.columns(3)
+    
+    with int_col1:
+        st.markdown("##### 🔄 Candidate Retraining")
+        st.caption("Train a fresh candidate model on verified reference data.")
+        force_retrain = st.checkbox("Force override cooldown", key="force_retrain_chk")
+        if st.button("Trigger Retraining", key="btn_manual_retrain", type="primary"):
+            with st.spinner("Training and verifying candidate model..."):
+                m_res = engine.execute_drift_retraining(
+                    training_df=orchestrator.reference_data,
+                    force=force_retrain,
+                    run_id="manual_operator_trigger",
+                )
+                st.session_state.last_manual_recovery_res = m_res
+                st.rerun()
+
+    with int_col2:
+        st.markdown("##### ⏪ Model Rollback")
+        st.caption("Revert active model to the previously validated version.")
+        confirm_rb = st.checkbox("Confirm rollback authorization", key="confirm_rb_chk")
+        if st.button("Execute Rollback", key="btn_manual_rollback", disabled=not confirm_rb):
+            with st.spinner("Rolling back model and verifying artifact..."):
+                m_res = engine.execute_rollback(run_id="manual_operator_trigger")
+                st.session_state.last_manual_recovery_res = m_res
+                st.rerun()
+
+    with int_col3:
+        st.markdown("##### 🛑 Safety Alert & Halt")
+        st.caption("Trigger an immutable safety shutdown event in audit logs.")
+        halt_reason = st.text_input("Incident Reason", value="Critical schema corruption or upstream anomaly", key="halt_reason_txt")
+        if st.button("Halt & Log Critical Alert", key="btn_manual_halt"):
+            with st.spinner("Logging critical alert..."):
+                m_res = engine.execute_alert_and_halt(
+                    reason=halt_reason,
+                    run_id="manual_operator_trigger",
+                )
+                st.session_state.last_manual_recovery_res = m_res
+                st.rerun()
+
+st.markdown("<hr style='border:none; border-top:1px solid rgba(255,255,255,0.06); margin:18px 0;'>", unsafe_allow_html=True)
+
+# Row 3: Supported Recovery Policy Matrix
+st.markdown("#### 4. Standardized Recovery Policies")
 
 policies = [
     {
@@ -103,14 +216,20 @@ policies = [
         "Trigger Event": "Deployment / Model Failure",
         "Action Type": "ROLLBACK_MODEL",
         "Behavior": "Reverts active pointer to the last known healthy validated model artifact.",
-        "Safety Mechanism": "Verifies target artifact integrity before switching active state.",
+        "Safety Mechanism": "Verifies target artifact integrity and loads model sanity check before switching active state.",
+    },
+    {
+        "Trigger Event": "Critical Pipeline Fault",
+        "Action Type": "ALERT_AND_HALT",
+        "Behavior": "Safely halts execution and logs immutable critical audit telemetry for human intervention.",
+        "Safety Mechanism": "Prevents downstream data corruption and halts further automated state changes.",
     },
 ]
 st.dataframe(pd.DataFrame(policies), use_container_width=True, hide_index=True)
 
-# Row 3: Recovery Actions Audit History
+# Row 4: Recovery Actions Audit History
 st.markdown("<hr style='border:none; border-top:1px solid rgba(255,255,255,0.06); margin:18px 0;'>", unsafe_allow_html=True)
-st.markdown("#### 4. Audit Trail of Executed Recovery Actions")
+st.markdown("#### 5. Audit Trail of Executed Recovery Actions")
 
 rec_history = get_recovery_actions(limit=50, db_path=settings.database_path)
 if rec_history:
