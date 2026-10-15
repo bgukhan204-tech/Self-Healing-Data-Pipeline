@@ -170,20 +170,18 @@ def test_alert_and_halt_execution(recovery_env):
     assert "Pipeline halted safely" in res.verification_details
 
 
-def test_decision_evaluation_manual_vs_auto_mode(recovery_env):
-    """Verify that retraining decisions respect the manual approval setting."""
+def test_decision_evaluation_drift_severity(recovery_env):
+    """Verify that retraining safety eligibility respects drift severity."""
     engine, db_file = recovery_env
 
-    # 1. Manual mode (default)
-    engine.settings.auto_recovery_mode = "manual"
-    decisions_manual = engine.evaluate_pipeline_situation(drift_status="CRITICAL")
-    retrain_dec = [d for d in decisions_manual if d.recommended_action == RecoveryActionType.TRIGGER_RETRAINING.value]
-    assert len(retrain_dec) == 1
-    assert retrain_dec[0].can_auto_execute is False
+    # 1. Warning drift is monitored only
+    decisions_warn = engine.evaluate_pipeline_situation(drift_status="WARNING")
+    retrain_warn = [d for d in decisions_warn if d.recommended_action == RecoveryActionType.TRIGGER_RETRAINING.value]
+    assert len(retrain_warn) == 1
+    assert retrain_warn[0].can_auto_execute is False
 
-    # 2. Automatic mode
-    engine.settings.auto_recovery_mode = "automatic"
-    decisions_auto = engine.evaluate_pipeline_situation(drift_status="CRITICAL")
-    retrain_dec_auto = [d for d in decisions_auto if d.recommended_action == RecoveryActionType.TRIGGER_RETRAINING.value]
-    assert len(retrain_dec_auto) == 1
-    assert retrain_dec_auto[0].can_auto_execute is True
+    # 2. Critical drift is eligible for guarded automatic retraining
+    decisions_crit = engine.evaluate_pipeline_situation(drift_status="CRITICAL")
+    retrain_crit = [d for d in decisions_crit if d.recommended_action == RecoveryActionType.TRIGGER_RETRAINING.value]
+    assert len(retrain_crit) == 1
+    assert retrain_crit[0].can_auto_execute is True

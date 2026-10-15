@@ -14,6 +14,7 @@ from src.database import (
     log_anomaly_events,
     log_drift_events,
     log_pipeline_run,
+    log_recovery_action,
     log_system_event,
 )
 from src.drift_detection import DatasetDriftReport, DriftMonitor
@@ -129,10 +130,26 @@ class PipelineOrchestrator:
             component="ORCHESTRATOR",
             description=f"Beginning pipeline execution for '{dataset_name}' (Run ID: {run_id}).",
             dataset_or_version=dataset_name,
+            db_path=self.settings.database_path,
         )
 
         # 1. Validation & Quarantine
         val_report = validate_dataset(df, dataset_name=dataset_name)
+
+        # Create the parent run row before anomaly/drift child events are persisted.
+        # The final call below updates this row without deleting its child records.
+        log_pipeline_run(
+            run_id=run_id,
+            dataset_name=dataset_name,
+            records_total=val_report.total_records,
+            records_valid=val_report.valid_records_count,
+            records_quarantined=val_report.quarantined_records_count,
+            records_anomalous=0,
+            quality_score=val_report.quality_score,
+            status="Processing",
+            execution_time_ms=0.0,
+            db_path=self.settings.database_path,
+        )
 
         if val_report.quarantined_records_count > 0:
             quar_exec = self.recovery_engine.execute_quarantine(
@@ -144,6 +161,9 @@ class PipelineOrchestrator:
 
         records_to_process = val_report.valid_df
         
+        # Monitoring failures must affect the final run status.
+        monitoring_failed = False
+
         # 2. Anomaly Detection (Isolation Forest)
         anomaly_res = None
         records_anomalous = 0
@@ -163,14 +183,20 @@ class PipelineOrchestrator:
                             "top_contributing_feature": str(row.get("top_contributing_indicator", "univariate_deviation")),
                             "record_payload": row.to_dict(),
                         })
-                    log_anomaly_events(run_id=run_id, anomalies=anom_payloads)
+                    log_anomaly_events(
+                        run_id=run_id,
+                        anomalies=anom_payloads,
+                        db_path=self.settings.database_path,
+                    )
             except Exception as e:
+                monitoring_failed = True
                 log_system_event(
                     event_type="ANOMALY_DETECTION_ERROR",
                     severity="ERROR",
                     component="ANOMALY_DETECTOR",
                     description=f"Anomaly detection encountered an error: {str(e)}",
                     error_details=str(e),
+                    db_path=self.settings.database_path,
                 )
 
         # 3. Drift Monitoring
@@ -192,14 +218,20 @@ class PipelineOrchestrator:
                         "drift_detected": rep.drift_detected,
                         "severity": rep.severity,
                     })
-                log_drift_events(run_id=run_id, drift_results=drift_db_items)
+                log_drift_events(
+                    run_id=run_id,
+                    drift_results=drift_db_items,
+                    db_path=self.settings.database_path,
+                )
             except Exception as e:
+                monitoring_failed = True
                 log_system_event(
                     event_type="DRIFT_DETECTION_ERROR",
                     severity="ERROR",
                     component="DRIFT_MONITOR",
                     description=f"Drift monitoring failed: {str(e)}",
                     error_details=str(e),
+                    db_path=self.settings.database_path,
                 )
 
         # 4. Decision Engine Evaluation
@@ -213,13 +245,60 @@ class PipelineOrchestrator:
         # 5. Autonomous Recovery Execution if in Automatic Mode
         if is_auto_mode:
             for d in decisions:
-                if d.recommended_action == "TRIGGER_RETRAINING" and self.reference_data is not None:
-                    # Execute retraining triggered by drift
-                    rec_res = self.recovery_engine.execute_drift_retraining(
-                        training_df=self.reference_data,
-                        force=False,
-                        run_id=run_id,
-                    )
+                # Retrain automatically only for critical drift. Warnings remain visible
+                # but must not launch a potentially disruptive training cycle.
+                if (
+                    d.recommended_action == "TRIGGER_RETRAINING"
+                    and d.can_auto_execute
+                    and drift_status == "CRITICAL"
+                ):
+                    # Supervised retraining must use incoming labeled data, not the old
+                    # reference baseline. RecoveryEngine validates suitability before training.
+                    try:
+                        rec_res = self.recovery_engine.execute_drift_retraining(
+                            training_df=records_to_process,
+                            force=False,
+                            run_id=run_id,
+                        )
+                    except Exception as e:
+                        # Recovery must not bypass final run persistence when an action
+                        # itself crashes. Record a failed execution and continue to the
+                        # normal status/audit path so the run cannot remain "Processing".
+                        error_message = str(e)
+                        summary = (
+                            "Automatic retraining raised an unexpected exception; "
+                            "the pipeline run was finalized with a warning."
+                        )
+                        log_system_event(
+                            event_type="RECOVERY_EXECUTION_ERROR",
+                            severity="ERROR",
+                            component="RECOVERY_ENGINE",
+                            description=summary,
+                            dataset_or_version=dataset_name,
+                            action_taken=d.recommended_action.value,
+                            outcome="FAILED",
+                            error_details=error_message,
+                            db_path=self.settings.database_path,
+                        )
+                        recovery_action_id = log_recovery_action(
+                            trigger_event=d.trigger.value,
+                            action_type=d.recommended_action.value,
+                            status="FAILED",
+                            outcome_summary=summary,
+                            run_id=run_id,
+                            attempts=1,
+                            error_details=error_message,
+                            db_path=self.settings.database_path,
+                        )
+                        rec_res = RecoveryExecutionResult(
+                            action_id=recovery_action_id,
+                            trigger=d.trigger.value,
+                            action_type=d.recommended_action.value,
+                            status="FAILED",
+                            attempts=1,
+                            outcome_summary=summary,
+                            error_details=error_message,
+                        )
                     recovery_executions.append(rec_res)
 
         # 6. Overall Status Determination
@@ -227,8 +306,14 @@ class PipelineOrchestrator:
             status = "Failed"
         elif recovery_executions and any(e.status == "FAILED" for e in recovery_executions):
             status = "Warning"
-        elif any(e.action_type in ["TRIGGER_RETRAINING", "ROLLBACK_MODEL"] for e in recovery_executions):
+        elif any(
+            e.action_type in ["TRIGGER_RETRAINING", "ROLLBACK_MODEL"]
+            and e.status == "SUCCESS"
+            for e in recovery_executions
+        ):
             status = "Recovering"
+        elif monitoring_failed:
+            status = "Warning"
         elif drift_status in ["WARNING", "CRITICAL"] or val_report.quarantined_records_count > 0:
             status = "Warning"
         else:
@@ -247,6 +332,7 @@ class PipelineOrchestrator:
             quality_score=val_report.quality_score,
             status=status,
             execution_time_ms=elapsed_ms,
+            db_path=self.settings.database_path,
         )
 
         log_system_event(
@@ -261,6 +347,7 @@ class PipelineOrchestrator:
             dataset_or_version=dataset_name,
             action_taken="RUN_COMPLETED",
             outcome=status,
+            db_path=self.settings.database_path,
         )
 
         return PipelineRunResult(

@@ -200,10 +200,20 @@ def log_pipeline_run(
     with get_connection(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT OR REPLACE INTO pipeline_runs (
+            INSERT INTO pipeline_runs (
                 run_id, dataset_name, records_total, records_valid, records_quarantined,
                 records_anomalous, quality_score, status, execution_time_ms, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(run_id) DO UPDATE SET
+                dataset_name = excluded.dataset_name,
+                records_total = excluded.records_total,
+                records_valid = excluded.records_valid,
+                records_quarantined = excluded.records_quarantined,
+                records_anomalous = excluded.records_anomalous,
+                quality_score = excluded.quality_score,
+                status = excluded.status,
+                execution_time_ms = excluded.execution_time_ms,
+                created_at = excluded.created_at
         """, (
             run_id, dataset_name, records_total, records_valid, records_quarantined,
             records_anomalous, quality_score, status, execution_time_ms, now_utc
@@ -384,18 +394,36 @@ def update_model_status(
 # READ & QUERY HELPERS
 # ==============================================================================
 
-def get_pipeline_runs(limit: int = 50, db_path: Optional[Path] = None) -> List[Dict[str, Any]]:
-    """Retrieve recent pipeline runs."""
+def get_pipeline_runs(
+    limit: int = 50,
+    db_path: Optional[Path] = None,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Retrieve recent pipeline runs, optionally filtered by status and run/dataset text."""
+    query = """
+        SELECT run_id, dataset_name, records_total, records_valid,
+               records_quarantined, records_anomalous, quality_score,
+               status, execution_time_ms, created_at
+        FROM pipeline_runs
+    """
+    conditions: List[str] = []
+    params: List[Any] = []
+    if status and status.upper() != "ALL":
+        conditions.append("status = ?")
+        params.append(status)
+    if search and search.strip():
+        conditions.append("(run_id LIKE ? OR dataset_name LIKE ?)")
+        search_pattern = f"%{search.strip()}%"
+        params.extend([search_pattern, search_pattern])
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+    query += " ORDER BY created_at DESC LIMIT ?"
+    params.append(max(1, int(limit)))
+
     with get_connection(db_path) as conn:
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT run_id, dataset_name, records_total, records_valid,
-                   records_quarantined, records_anomalous, quality_score,
-                   status, execution_time_ms, created_at
-            FROM pipeline_runs
-            ORDER BY created_at DESC
-            LIMIT ?
-        """, (limit,))
+        cursor.execute(query, params)
         return [dict(row) for row in cursor.fetchall()]
 
 
@@ -433,6 +461,84 @@ def get_recovery_actions(limit: int = 50, db_path: Optional[Path] = None) -> Lis
             ORDER BY created_at DESC
             LIMIT ?
         """, (limit,))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_recent_drift_events(
+    limit: int = 20,
+    db_path: Optional[Path] = None,
+) -> List[Dict[str, Any]]:
+    """Retrieve recent detected drift events with feature-level diagnostics."""
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, run_id, feature_name, test_method, statistic,
+                   p_value, severity, created_at
+            FROM drift_events
+            WHERE drift_detected = 1
+            ORDER BY datetime(created_at) DESC, id DESC
+            LIMIT ?
+        """, (max(1, int(limit)),))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_recent_anomaly_events(
+    limit: int = 20,
+    db_path: Optional[Path] = None,
+    run_id: Optional[str] = None,
+    search: Optional[str] = None,
+    min_score: Optional[float] = None,
+) -> List[Dict[str, Any]]:
+    """Retrieve recent anomaly detections, optionally filtered for investigation.
+
+    Searches only safe metadata fields and never returns the stored record payload.
+    """
+    query = """
+        SELECT id, run_id, record_index, anomaly_score, detector_method,
+               top_contributing_feature, created_at
+        FROM anomaly_events
+    """
+    conditions: List[str] = []
+    params: List[Any] = []
+    if run_id and run_id.strip():
+        conditions.append("run_id = ?")
+        params.append(run_id.strip())
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        conditions.append(
+            "(run_id LIKE ? OR detector_method LIKE ? "
+            "OR top_contributing_feature LIKE ?)"
+        )
+        params.extend([pattern, pattern, pattern])
+    if min_score is not None:
+        conditions.append("anomaly_score >= ?")
+        params.append(float(min_score))
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+    query += " ORDER BY datetime(created_at) DESC, id DESC LIMIT ?"
+    params.append(max(1, int(limit)))
+
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_recent_failed_recoveries(
+    limit: int = 20,
+    db_path: Optional[Path] = None,
+) -> List[Dict[str, Any]]:
+    """Retrieve recent failed recovery actions with actionable audit details."""
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT action_id, run_id, trigger_event, action_type, status,
+                   attempts, outcome_summary, error_details, created_at
+            FROM recovery_actions
+            WHERE status = 'FAILED'
+            ORDER BY datetime(created_at) DESC, action_id DESC
+            LIMIT ?
+        """, (max(1, int(limit)),))
         return [dict(row) for row in cursor.fetchall()]
 
 
@@ -484,16 +590,32 @@ def get_latest_metrics_summary(db_path: Optional[Path] = None) -> Dict[str, Any]
         row["current_status"] = last_status_row["status"] if last_status_row else "Healthy"
 
         cursor.execute("""
-            SELECT 
+            SELECT
                 COUNT(*) as total_recoveries,
-                SUM(CASE WHEN status = 'SUCCESS' THEN 1 ELSE 0 END) as successful_recoveries
+                COALESCE(SUM(CASE WHEN status = 'SUCCESS' THEN 1 ELSE 0 END), 0) as successful_recoveries,
+                COALESCE(SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END), 0) as failed_recoveries
             FROM recovery_actions
         """)
         rec_row = cursor.fetchone()
         total_rec = rec_row["total_recoveries"] if rec_row else 0
         succ_rec = rec_row["successful_recoveries"] if rec_row else 0
-        row["recovery_success_rate"] = (succ_rec / total_rec * 100.0) if total_rec > 0 else 100.0
+        failed_rec = rec_row["failed_recoveries"] if rec_row else 0
+        # No recovery attempts is not a 100% success rate; None means not yet measurable.
+        row["recovery_success_rate"] = (succ_rec / total_rec * 100.0) if total_rec > 0 else None
         row["total_recoveries"] = total_rec
+        row["successful_recoveries"] = succ_rec
+        row["failed_recoveries"] = failed_rec
+
+        cursor.execute("""
+            SELECT COUNT(*) AS failed_recoveries_24h
+            FROM recovery_actions
+            WHERE status = 'FAILED'
+              AND datetime(created_at) >= datetime('now', '-24 hours')
+        """)
+        recent_failures_row = cursor.fetchone()
+        row["failed_recoveries_24h"] = (
+            recent_failures_row["failed_recoveries_24h"] if recent_failures_row else 0
+        )
 
         # Get latest drift count
         cursor.execute("""

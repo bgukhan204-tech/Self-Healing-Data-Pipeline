@@ -67,7 +67,6 @@ def test_out_of_range_and_quarantine():
     assert 2 in report.flagged_reasons
     assert len(report.valid_df) <= 47
 
-
 def test_missing_required_schema_columns():
     """Verify that a dataset missing essential columns fails validation."""
     invalid_schema_df = pd.DataFrame({
@@ -132,3 +131,15 @@ def test_load_csv_safely_empty_and_size_limits(tmp_path):
     assert df is None
     assert "empty" in err.lower()
 
+
+def test_duplicate_detection_with_non_default_index():
+    """Duplicate detection must work when index labels are not row positions."""
+    base_df = generate_synthetic_dataset(n_samples=10, random_seed=42)
+    duplicate_rows = base_df.iloc[:2].copy()
+    df = pd.concat([base_df, duplicate_rows], ignore_index=True)
+    df.index = range(100, 100 + len(df))
+
+    report = validate_dataset(df, dataset_name="non_default_index_test.csv")
+
+    assert report.duplicate_count == 2
+    assert report.quarantined_records_count >= 2

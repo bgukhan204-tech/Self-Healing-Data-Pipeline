@@ -15,6 +15,7 @@ from src.database import (
     log_system_event,
 )
 from src.model_registry import ModelRegistryManager
+from src.preprocessing import TARGET_COLUMN
 
 
 class RecoveryTrigger(str, Enum):
@@ -145,13 +146,20 @@ class RecoveryEngine:
 
         # 3. Data Drift Detected
         if drift_status in ["WARNING", "CRITICAL"]:
+            is_critical = drift_status == "CRITICAL"
             decisions.append(RecoveryDecision(
                 trigger=RecoveryTrigger.DATA_DRIFT_DETECTED,
                 recommended_action=RecoveryActionType.TRIGGER_RETRAINING,
-                can_auto_execute=(self.settings.auto_recovery_mode == "automatic"),
+                # Safety eligibility is independent of the runtime mode; the orchestrator
+                # separately decides whether this run may execute automatic actions.
+                can_auto_execute=is_critical,
                 explanation=(
                     f"Statistical data drift detected (Severity: {drift_status}). "
-                    "Recommend triggering candidate retraining with fresh labeled data if validation criteria are met."
+                    + (
+                        "Critical drift can trigger guarded retraining when labeled data is available."
+                        if is_critical
+                        else "Warning drift is monitored only; automatic retraining is reserved for critical drift."
+                    )
                 ),
                 context={"drift_status": drift_status},
             ))
@@ -195,8 +203,16 @@ class RecoveryEngine:
         """
         Execute an operation with bounded retries and exponential backoff.
         """
-        max_attempts = max_attempts or self.settings.max_retry_attempts
-        backoff = backoff_sec or self.settings.retry_backoff_seconds
+        max_attempts = (
+            self.settings.max_retry_attempts if max_attempts is None else max_attempts
+        )
+        backoff = (
+            self.settings.retry_backoff_seconds if backoff_sec is None else backoff_sec
+        )
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be at least 1")
+        if backoff < 0:
+            raise ValueError("backoff_sec must be non-negative")
         last_error = None
 
         for attempt in range(1, max_attempts + 1):
@@ -335,7 +351,59 @@ class RecoveryEngine:
         Execute automated retraining triggered by drift, respecting cooldown and verifying outcome.
         """
         action_type = RecoveryActionType.TRIGGER_RETRAINING.value
-        
+
+        # Supervised retraining is unsafe without a usable target column and enough
+        # examples to create stratified train/validation splits.
+        if TARGET_COLUMN not in training_df.columns:
+            msg = (
+                f"Retraining skipped: incoming data has no '{TARGET_COLUMN}' labels. "
+                "Collect labeled outcomes before training a supervised candidate."
+            )
+            action_id = log_recovery_action(
+                trigger_event=RecoveryTrigger.DATA_DRIFT_DETECTED.value,
+                action_type=action_type,
+                status="SKIPPED",
+                outcome_summary=msg,
+                run_id=run_id,
+                db_path=self.settings.database_path,
+            )
+            return RecoveryExecutionResult(
+                action_id=action_id,
+                trigger=RecoveryTrigger.DATA_DRIFT_DETECTED.value,
+                action_type=action_type,
+                status="SKIPPED",
+                attempts=0,
+                outcome_summary=msg,
+            )
+        target_values = training_df[TARGET_COLUMN]
+        class_counts = target_values.dropna().value_counts()
+        if (
+            len(training_df) < 40
+            or target_values.isna().any()
+            or len(class_counts) < 2
+            or (not class_counts.empty and class_counts.min() < 2)
+        ):
+            msg = (
+                "Retraining skipped: at least 40 complete labeled rows and two target "
+                "classes with at least two examples each are required for stratified evaluation."
+            )
+            action_id = log_recovery_action(
+                trigger_event=RecoveryTrigger.DATA_DRIFT_DETECTED.value,
+                action_type=action_type,
+                status="SKIPPED",
+                outcome_summary=msg,
+                run_id=run_id,
+                db_path=self.settings.database_path,
+            )
+            return RecoveryExecutionResult(
+                action_id=action_id,
+                trigger=RecoveryTrigger.DATA_DRIFT_DETECTED.value,
+                action_type=action_type,
+                status="SKIPPED",
+                attempts=0,
+                outcome_summary=msg,
+            )
+
         # Check cooldown
         if not force:
             cooling, remaining = self.check_cooldown(action_type)
@@ -347,6 +415,7 @@ class RecoveryEngine:
                     status="SKIPPED",
                     outcome_summary=msg,
                     run_id=run_id,
+                    db_path=self.settings.database_path,
                 )
                 return RecoveryExecutionResult(
                     action_id=action_id,

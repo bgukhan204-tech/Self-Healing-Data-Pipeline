@@ -122,12 +122,13 @@ def validate_dataset(
     flagged_reasons: Dict[int, List[str]] = {}
     quarantined_indices: Set[int] = set()
 
-    for idx, row in df.iterrows():
+    for position, (idx, row) in enumerate(df.iterrows()):
         reasons: List[str] = []
         is_quarantine_level = False
 
-        # Duplicate flag
-        if duplicate_mask.iloc[idx]:
+        # Use the row's position for the positional duplicate mask; DataFrame
+        # index labels are not guaranteed to be zero-based integers.
+        if duplicate_mask.iloc[position]:
             reasons.append("Exact duplicate row")
             is_quarantine_level = True
 
