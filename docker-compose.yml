@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  self-healing-pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: self_healing_pipeline
+    ports:
+      - "8501:8501"
+    environment:
+      - AUTO_RECOVERY_MODE=manual
+      - RECOVERY_COOLDOWN_SECONDS=60
+      - MAX_RETRY_ATTEMPTS=3
+    volumes:
+      - pipeline_data:/app/data
+      - pipeline_models:/app/artifacts/models
+    restart: unless-stopped
+
+volumes:
+  pipeline_data:
+  pipeline_models:

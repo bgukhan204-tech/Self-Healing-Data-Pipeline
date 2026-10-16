@@ -1,0 +1,35 @@
+# Git and metadata
+.git
+.gitignore
+.github
+
+# Virtual environments
+.venv
+venv
+ENV
+env
+
+# Bytecode and caches
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.coverage
+htmlcov
+
+# IDEs
+.vscode
+.idea
+
+# Secrets and local configurations
+.env
+.env.local
+.streamlit/secrets.toml
+
+# Local database and transient files
+*.db
+*.sqlite3
+data/uploads/*
+data/quarantine/*
+artifacts/models/*
